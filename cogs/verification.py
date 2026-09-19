@@ -246,22 +246,22 @@ class VerificationCog(commands.Cog, name="Verification"):
 
     @app_commands.command(
         name="post_verification",
-        description="Publish the server rules embed with the interactive verification button."
+        description="Publish official server rules with the ✅ reaction verification (matching community design)."
     )
     @app_commands.describe(
         channel="Channel to publish in (defaults to #rules or current channel)",
-        title="Custom title for the rules embed",
-        description="Custom rules description text"
+        with_button="Also include interactive button below rules (default: False, reaction only)",
+        title="Optional custom title (leave empty for clean look like in screenshot)"
     )
     @is_staff()
     async def post_verification(
         self,
         interaction: discord.Interaction,
         channel: discord.TextChannel = None,
-        title: str = None,
-        description: str = None
+        with_button: bool = False,
+        title: str = None
     ):
-        """Posts the official rules & verification view to a channel."""
+        """Posts the official community rules and adds the ✅ reaction."""
         target_channel = channel
         if not target_channel:
             rules_ch = discord.utils.find(
@@ -270,31 +270,32 @@ class VerificationCog(commands.Cog, name="Verification"):
             )
             target_channel = rules_ch or interaction.channel
 
-        embed_title = title or config.DEFAULT_VERIFICATION_TITLE
-        embed_desc = description or config.DEFAULT_VERIFICATION_DESCRIPTION
+        embed_desc = config.OFFICIAL_RULES_DESCRIPTION
 
-        embed = discord.Embed(
-            title=embed_title,
-            description=embed_desc,
-            color=config.EMBED_COLOR_DEFAULT
-        )
-        if interaction.guild.icon:
-            embed.set_thumbnail(url=interaction.guild.icon.url)
-        embed.set_footer(
-            text="Click the button below to verify and accept rules",
-            icon_url=interaction.client.user.display_avatar.url
-        )
+        # Create sleek embed with purple accent matching community screenshot
+        if title:
+            embed = discord.Embed(
+                title=title,
+                description=embed_desc,
+                color=config.RULES_EMBED_COLOR
+            )
+        else:
+            embed = discord.Embed(
+                description=embed_desc,
+                color=config.RULES_EMBED_COLOR
+            )
 
-        view = PersistentVerificationView()
+        view = PersistentVerificationView() if with_button else None
         msg = await target_channel.send(embed=embed, view=view)
 
+        # Add the checkmark reaction
         try:
             await msg.add_reaction("✅")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Could not add reaction to rules message: {e}")
 
         await interaction.response.send_message(
-            f"✅ Verification message successfully posted to {target_channel.mention}!",
+            f"✅ Server rules successfully published to {target_channel.mention} with reaction verification!",
             ephemeral=True
         )
 

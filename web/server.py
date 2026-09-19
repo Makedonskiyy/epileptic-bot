@@ -181,25 +181,16 @@ async def api_post_verify(request: Request, channel_name: str = Form("rules")):
         return JSONResponse({"success": False, "error": f"Channel containing '{channel_name}' not found."}, status_code=404)
 
     try:
-        from cogs.verification import PersistentVerificationView
         embed = discord.Embed(
-            title=config.DEFAULT_VERIFICATION_TITLE,
-            description=config.DEFAULT_VERIFICATION_DESCRIPTION,
-            color=config.EMBED_COLOR_DEFAULT
-        )
-        if guild.icon:
-            embed.set_thumbnail(url=guild.icon.url)
-        embed.set_footer(
-            text="Click the button below to accept rules and verify",
-            icon_url=bot.user.display_avatar.url
+            description=config.OFFICIAL_RULES_DESCRIPTION,
+            color=config.RULES_EMBED_COLOR
         )
 
-        view = PersistentVerificationView()
-        msg = await target_channel.send(embed=embed, view=view)
+        msg = await target_channel.send(embed=embed)
         try:
             await msg.add_reaction("✅")
         except Exception:
             pass
-        return {"success": True, "message": f"Verification rules successfully posted to #{target_channel.name}!"}
+        return {"success": True, "message": f"Server rules successfully posted to #{target_channel.name} with reaction verification!"}
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)

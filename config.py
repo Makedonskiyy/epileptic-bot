@@ -48,21 +48,39 @@ EMBED_COLOR_WARNING = 0xFEE75C    # Yellow
 EMBED_COLOR_ERROR = 0xED4245      # Red
 EMBED_COLOR_PREMIUM = 0xFEE75C    # Gold
 
-# Verification Embed & Button Settings (English)
-VERIFY_BUTTON_LABEL = "Accept Rules & Get Access"
-VERIFY_BUTTON_EMOJI = "✅"
-VERIFY_CUSTOM_ID = "epileptic:persistent:verify_button"
+# Official Server Rules (Exact layout from community screenshot)
+RULES_EMBED_COLOR = 0xA855F7      # Vibrant Purple matching server rules stripe
 
-DEFAULT_VERIFICATION_TITLE = "📜 Server Rules & Verification"
-DEFAULT_VERIFICATION_DESCRIPTION = (
-    "Welcome to the **Epileptic** Community!\n\n"
-    "To access all public community channels, resources, and chats, please review and agree to our guidelines:\n\n"
-    "**1. Respect Everyone:** Treat fellow members and staff with dignity and courtesy.\n"
-    "**2. No Spam or Flooding:** Keep chats readable. Self-promotion and mass mentions are prohibited.\n"
-    "**3. Stay on Topic:** Post questions and content in the appropriate channels.\n"
-    "**4. Safety & Security:** Do not share malicious files, harmful links, or unauthorized advertisements.\n\n"
-    "Click the green **«Accept Rules & Get Access»** button below or react with ✅ to receive the **Member** role!"
+OFFICIAL_RULES_DESCRIPTION = (
+    "**1. BE RESPECTFUL**\n\n"
+    "Treat people the way you want to be treated. Keep it civil and show genuine respect to everyone here.\n\n"
+    "**2. KEEP IT APPROPRIATE**\n\n"
+    "Cursing is fine, but targeted harassment will get you removed. No slurs or personal attacks.\n\n"
+    "**3. NO SPAM**\n\n"
+    "Keep the chat clean and readable. No text flooding, mass tagging, or repetitive messages.\n\n"
+    "**4. DO NOT LEAK PROMPTS**\n\n"
+    "Everything shared here stays strictly within this community. Leaking prompts ruins methods and gets things patched fast.\n\n"
+    "**5. NO PROMOTION**\n\n"
+    "No self promo, unsolicited DMs, or random links. You can share your work only if it fits the ongoing topic naturally.\n\n"
+    "**6. ZERO TOLERANCE FOR THREATS**\n\n"
+    "Threatening anyone with dox, DDoS, or violence results in an instant ban and a direct report to Discord Trust and Safety.\n\n"
+    "**7. NO SHARING API KEYS**\n\n"
+    "Do not share, ask for, or attempt to sell API keys. Keep all credentials and tokens strictly private.\n\n"
+    "**8. USE THE RIGHT CHANNELS**\n\n"
+    "Keep discussions and file sharing organized. Post your questions, files, and prompts only in their designated areas.\n\n"
+    "**9. NO IMPERSONATION**\n\n"
+    "Do not pretend to be staff, creators, or other members. Faking identity leads to an immediate ban.\n\n"
+    "**10. RESPECT STAFF**\n\n"
+    "Follow directions given by mods and admins. If you have an issue, open a support ticket instead of arguing publicly.\n\n"
+    "**11. DROP THE DRAMA**\n\n"
+    "Handle personal disagreements privately like an adult. Do not bait, instigate arguments, or disrupt the vibe.\n\n"
+    "**12. VIBE AND CONNECT**\n\n"
+    "Network, share your projects, and enjoy your time. Help build a high value space for everyone."
 )
+
+DEFAULT_VERIFICATION_TITLE = None
+DEFAULT_VERIFICATION_DESCRIPTION = OFFICIAL_RULES_DESCRIPTION
+
 
 # Server Categories and Channel Structure
 SERVER_STRUCTURE = {
