@@ -1,44 +1,45 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Скрипт автоматического развертывания Epileptic Bot на Ubuntu / Debian VPS
+# Automated Epileptic Bot Setup Script for Ubuntu / Debian VPS
 # ==============================================================================
 
 set -e
 
-echo "=== [1/5] Обновление системных пакетов Ubuntu ==="
+echo "=== [1/5] Updating Ubuntu packages & installing prerequisites ==="
 sudo apt-get update && sudo apt-get install -y python3 python3-pip python3-venv git curl
 
-BOT_DIR="/opt/epileptic-bot"
+TARGET_DIR="/opt/epileptic-bot"
+CURRENT_DIR="$(pwd)"
 
-echo "=== [2/5] Подготовка директории проекта ($BOT_DIR) ==="
-sudo mkdir -p $BOT_DIR
-# Если запускается из текущей папки проекта:
-if [ -f "./bot.py" ]; then
-    echo "Копирование текущих файлов в $BOT_DIR..."
-    sudo cp -r ./* $BOT_DIR/
+echo "=== [2/5] Preparing bot directory ==="
+if [ "$CURRENT_DIR" != "$TARGET_DIR" ]; then
+    echo "Copying files from $CURRENT_DIR to $TARGET_DIR..."
+    sudo mkdir -p "$TARGET_DIR"
+    sudo cp -r "$CURRENT_DIR"/* "$TARGET_DIR"/
+    sudo cp -r "$CURRENT_DIR"/.[!.]* "$TARGET_DIR"/ 2>/dev/null || true
+    cd "$TARGET_DIR"
 else
-    echo "Внимание: запустите данный скрипт внутри папки с проектом бота или скопируйте файлы в $BOT_DIR вручную."
+    echo "Already in target directory: $TARGET_DIR"
 fi
 
-cd $BOT_DIR
-
-echo "=== [3/5] Создание виртуального окружения Python и установка зависимостей ==="
+echo "=== [3/5] Setting up Python virtual environment ==="
 if [ ! -d "venv" ]; then
     sudo python3 -m venv venv
 fi
 sudo ./venv/bin/pip install --upgrade pip
 sudo ./venv/bin/pip install -r requirements.txt
 
-echo "=== [4/5] Проверка конфигурации .env ==="
+echo "=== [4/5] Checking environment configuration (.env) ==="
 if [ ! -f ".env" ]; then
     if [ -f ".env.example" ]; then
         sudo cp .env.example .env
-        echo "Файл .env создан из .env.example. Обязательно укажите ваш DISCORD_TOKEN:"
-        echo "nano $BOT_DIR/.env"
+        echo "Created .env from .env.example."
+        echo "⚠️ Please set your DISCORD_TOKEN:"
+        echo "sudo nano $TARGET_DIR/.env"
     fi
 fi
 
-echo "=== [5/5] Установка и запуск системного сервиса (systemd) ==="
+echo "=== [5/5] Installing & starting systemd service ==="
 sudo cp deploy/epileptic.service /etc/systemd/system/epileptic.service
 sudo systemctl daemon-reload
 sudo systemctl enable epileptic.service
@@ -46,8 +47,9 @@ sudo systemctl restart epileptic.service
 
 echo ""
 echo "=================================================================="
-echo "✅ Установка завершена!"
-echo "• Статус сервиса: sudo systemctl status epileptic.service"
-echo "• Просмотр логов в реальном времени: sudo journalctl -u epileptic.service -f"
-echo "• Веб-панель доступна по адресу: http://IP_ВАШЕГО_СЕРВЕРА:8080"
+echo "✅ Deployment completed successfully!"
+echo "• Check bot service status: sudo systemctl status epileptic.service"
+echo "• View real-time logs:      sudo journalctl -u epileptic.service -f"
+echo "• Pull future git updates:  cd /opt/epileptic-bot && git pull && sudo systemctl restart epileptic.service"
+echo "• Web dashboard live at:    http://YOUR_SERVER_IP:8080"
 echo "=================================================================="
