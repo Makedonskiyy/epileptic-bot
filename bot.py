@@ -60,8 +60,7 @@ class EpilepticBot(commands.Bot):
             "cogs.tickets",
             "cogs.setup_server",
             "cogs.moderation",
-            "cogs.premium",
-            "cogs.broadcast"
+            "cogs.premium"
         ]
 
         for ext in initial_extensions:

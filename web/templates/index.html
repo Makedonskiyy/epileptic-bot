@@ -243,97 +243,271 @@
                         <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono font-bold">Armed</span>
                     </div>
 
-        <!-- Rich Post Creator / Broadcaster Section -->
+        <!-- Rich Post Studio / Broadcaster Section with Live Discord Preview -->
         <div class="glass-card rounded-2xl p-6 space-y-6">
-            <div class="flex items-center justify-between border-b border-bordercolor pb-4">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-bordercolor pb-4">
                 <div class="flex items-center space-x-3">
                     <div class="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 text-lg">
-                        <i class="fa-solid fa-bullhorn"></i>
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
                     </div>
                     <div>
-                        <h3 class="text-lg font-bold text-white">Rich Post Publisher (Broadcast)</h3>
-                        <p class="text-xs text-gray-400">Create & broadcast formatted embeds with custom colors, banners, and role pings to any channel.</p>
+                        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                            Rich Post Studio
+                            <span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-brand-500/20 text-brand-300 border border-brand-500/30">Web Exclusive</span>
+                        </h3>
+                        <p class="text-xs text-gray-400">Compose styled community announcements, updates & releases with live Discord preview & direct image upload.</p>
                     </div>
                 </div>
-                <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/30">Markdown Supported</span>
+                <div class="flex items-center gap-2">
+                    <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                        Live Interactive Preview
+                    </span>
+                </div>
             </div>
 
-            <form id="broadcastForm" class="space-y-4">
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <!-- Channel Selector -->
-                    <div>
-                        <label class="block text-xs font-semibold text-gray-300 mb-1.5 uppercase tracking-wider">Target Channel:</label>
-                        <select id="bChannel" name="channel_name" class="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-bordercolor text-white text-sm focus:outline-none focus:border-brand-500">
-                            {% if guild and guild.text_channels %}
-                                {% for ch in guild.text_channels %}
-                                <option value="{{ ch }}">#{{ ch }}</option>
-                                {% endfor %}
-                            {% else %}
-                                <option value="ai-news">#ai-news</option>
-                                <option value="general">#general</option>
-                                <option value="announcements">#announcements</option>
-                                <option value="jailbreak">#jailbreak</option>
-                                <option value="premium-prompts">#premium-prompts</option>
-                            {% endif %}
-                        </select>
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <!-- Left Column: Visual Editor -->
+                <div class="lg:col-span-7 space-y-5">
+                    <form id="broadcastForm" class="space-y-4" onsubmit="event.preventDefault(); submitBroadcastPost();">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <!-- Target Channel -->
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-300 mb-1.5 uppercase tracking-wider">
+                                    <i class="fa-solid fa-hashtag text-purple-400 mr-1"></i> Target Channel:
+                                </label>
+                                <select id="bChannel" name="channel_name" onchange="updateLivePreview()" class="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-bordercolor text-white text-sm focus:outline-none focus:border-brand-500">
+                                    {% if guild and guild.text_channels %}
+                                        {% for ch in guild.text_channels %}
+                                        <option value="{{ ch }}">#{{ ch }}</option>
+                                        {% endfor %}
+                                    {% else %}
+                                        <option value="announcements">#announcements</option>
+                                        <option value="ai-news">#ai-news</option>
+                                        <option value="general">#general</option>
+                                        <option value="jailbreak">#jailbreak</option>
+                                        <option value="premium-prompts">#premium-prompts</option>
+                                    {% endif %}
+                                </select>
+                            </div>
+
+                            <!-- Mention Audience -->
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-300 mb-1.5 uppercase tracking-wider">
+                                    <i class="fa-solid fa-at text-purple-400 mr-1"></i> Mention Role:
+                                </label>
+                                <select id="bMention" name="mention" onchange="updateLivePreview()" class="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-bordercolor text-white text-sm focus:outline-none focus:border-brand-500">
+                                    <option value="none" selected>No Mention</option>
+                                    <option value="member">@Member</option>
+                                    <option value="premium">@Premium Member</option>
+                                    <option value="here">@here</option>
+                                    <option value="everyone">@everyone</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Color Palette Picker -->
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-300 mb-2 uppercase tracking-wider">
+                                <i class="fa-solid fa-palette text-purple-400 mr-1"></i> Theme Color Accent:
+                            </label>
+                            <input type="hidden" id="bColor" name="color" value="purple">
+                            <div class="grid grid-cols-4 sm:grid-cols-7 gap-2" id="colorPalette">
+                                <button type="button" onclick="selectColor('purple', '#A855F7')" class="color-btn active flex flex-col items-center justify-center p-2 rounded-xl border-2 border-purple-500 bg-purple-500/10 hover:bg-purple-500/20 transition-all text-xs font-medium text-white" data-color="purple">
+                                    <span class="w-4 h-4 rounded-full bg-[#A855F7] mb-1 shadow-sm shadow-purple-500/50"></span>
+                                    Purple
+                                </button>
+                                <button type="button" onclick="selectColor('gold', '#FEE75C')" class="color-btn flex flex-col items-center justify-center p-2 rounded-xl border border-bordercolor bg-black/30 hover:bg-black/50 transition-all text-xs font-medium text-gray-300" data-color="gold">
+                                    <span class="w-4 h-4 rounded-full bg-[#FEE75C] mb-1"></span>
+                                    Gold VIP
+                                </button>
+                                <button type="button" onclick="selectColor('green', '#57F287')" class="color-btn flex flex-col items-center justify-center p-2 rounded-xl border border-bordercolor bg-black/30 hover:bg-black/50 transition-all text-xs font-medium text-gray-300" data-color="green">
+                                    <span class="w-4 h-4 rounded-full bg-[#57F287] mb-1"></span>
+                                    Green
+                                </button>
+                                <button type="button" onclick="selectColor('red', '#ED4245')" class="color-btn flex flex-col items-center justify-center p-2 rounded-xl border border-bordercolor bg-black/30 hover:bg-black/50 transition-all text-xs font-medium text-gray-300" data-color="red">
+                                    <span class="w-4 h-4 rounded-full bg-[#ED4245] mb-1"></span>
+                                    Alert
+                                </button>
+                                <button type="button" onclick="selectColor('blue', '#5865F2')" class="color-btn flex flex-col items-center justify-center p-2 rounded-xl border border-bordercolor bg-black/30 hover:bg-black/50 transition-all text-xs font-medium text-gray-300" data-color="blue">
+                                    <span class="w-4 h-4 rounded-full bg-[#5865F2] mb-1"></span>
+                                    Blurple
+                                </button>
+                                <button type="button" onclick="selectColor('cyan', '#00F0FF')" class="color-btn flex flex-col items-center justify-center p-2 rounded-xl border border-bordercolor bg-black/30 hover:bg-black/50 transition-all text-xs font-medium text-gray-300" data-color="cyan">
+                                    <span class="w-4 h-4 rounded-full bg-[#00F0FF] mb-1"></span>
+                                    Cyan
+                                </button>
+                                <button type="button" onclick="selectColor('dark', '#2B2D31')" class="color-btn flex flex-col items-center justify-center p-2 rounded-xl border border-bordercolor bg-black/30 hover:bg-black/50 transition-all text-xs font-medium text-gray-300" data-color="dark">
+                                    <span class="w-4 h-4 rounded-full bg-[#2B2D31] border border-gray-600 mb-1"></span>
+                                    Dark
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Post Title -->
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-300 mb-1.5 uppercase tracking-wider">
+                                <i class="fa-solid fa-heading text-purple-400 mr-1"></i> Post Title:
+                            </label>
+                            <input type="text" id="bTitle" name="title" oninput="updateLivePreview()" placeholder="e.g. 🚀 DeepSeek 4.1 + Gemini Flash Jailbreaks Released!" class="w-full px-4 py-2.5 rounded-xl bg-black/40 border border-bordercolor text-white text-sm focus:outline-none focus:border-brand-500">
+                        </div>
+
+                        <!-- Markdown Toolbar & Post Content -->
+                        <div>
+                            <div class="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                                <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wider">
+                                    <i class="fa-solid fa-pen-nib text-purple-400 mr-1"></i> Content / Message:
+                                </label>
+                                <!-- Quick Markdown Format Buttons -->
+                                <div class="flex flex-wrap items-center gap-1 bg-black/50 p-1 rounded-lg border border-bordercolor text-xs">
+                                    <button type="button" onclick="insertMarkdown('**', '**', 'bold text')" title="Bold" class="px-2 py-0.5 rounded hover:bg-white/10 text-gray-300 font-bold">B</button>
+                                    <button type="button" onclick="insertMarkdown('*', '*', 'italic text')" title="Italic" class="px-2 py-0.5 rounded hover:bg-white/10 text-gray-300 italic">I</button>
+                                    <button type="button" onclick="insertMarkdown('~~', '~~', 'strikethrough')" title="Strikethrough" class="px-2 py-0.5 rounded hover:bg-white/10 text-gray-300 line-through">S</button>
+                                    <span class="w-px h-3 bg-bordercolor mx-0.5"></span>
+                                    <button type="button" onclick="insertMarkdown('> ', '', 'quoted message')" title="Quote" class="px-2 py-0.5 rounded hover:bg-white/10 text-gray-300 font-mono">&gt;</button>
+                                    <button type="button" onclick="insertMarkdown('`', '`', 'inline code')" title="Inline Code" class="px-2 py-0.5 rounded hover:bg-white/10 text-gray-300 font-mono">&lt;/&gt;</button>
+                                    <button type="button" onclick="insertMarkdown('```\n', '\n```', 'code block')" title="Code Block" class="px-2 py-0.5 rounded hover:bg-white/10 text-gray-300 font-mono">```</button>
+                                    <button type="button" onclick="insertMarkdown('### ', '', 'Heading')" title="Header" class="px-2 py-0.5 rounded hover:bg-white/10 text-gray-300 font-bold">H3</button>
+                                    <button type="button" onclick="insertMarkdown('• ', '', 'list item')" title="Bullet" class="px-2 py-0.5 rounded hover:bg-white/10 text-gray-300">• List</button>
+                                </div>
+                            </div>
+                            <textarea id="bContent" name="content" rows="6" required oninput="updateLivePreview()" placeholder="Type your announcement, guides, or updates here... Supports **bold**, *italic*, > quotes, code blocks and links." class="w-full px-4 py-3 rounded-xl bg-black/40 border border-bordercolor text-white text-sm focus:outline-none focus:border-brand-500 font-sans"></textarea>
+                        </div>
+
+                        <!-- Direct File Upload & Banner Image -->
+                        <div class="space-y-3">
+                            <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wider">
+                                <i class="fa-solid fa-image text-purple-400 mr-1"></i> Banner / Illustration:
+                            </label>
+
+                            <!-- Direct File Upload Input & Dropzone -->
+                            <input type="file" id="bImageFile" name="image_file" accept="image/png,image/jpeg,image/gif,image/webp" class="hidden" onchange="handleFileSelect(event)">
+
+                            <div id="dropzone" onclick="document.getElementById('bImageFile').click()" class="border-2 border-dashed border-bordercolor hover:border-brand-500/60 rounded-xl p-4 text-center cursor-pointer bg-black/20 hover:bg-brand-500/5 transition-all">
+                                <div id="uploadPrompt" class="space-y-1">
+                                    <div class="text-purple-400 text-2xl mb-1">
+                                        <i class="fa-solid fa-cloud-arrow-up"></i>
+                                    </div>
+                                    <p class="text-xs font-semibold text-white">Click or drag & drop to upload an image from your device</p>
+                                    <p class="text-[11px] text-gray-400">PNG, JPG, GIF, WEBP up to 10MB • Uploads directly to Discord</p>
+                                </div>
+
+                                <div id="uploadPreview" class="hidden flex items-center justify-between p-2 rounded-lg bg-black/40 border border-bordercolor">
+                                    <div class="flex items-center space-x-3 overflow-hidden">
+                                        <img id="uploadThumb" src="" alt="Thumbnail" class="w-12 h-12 rounded object-cover border border-bordercolor flex-shrink-0">
+                                        <div class="text-left overflow-hidden">
+                                            <p id="uploadName" class="text-xs font-bold text-white truncate"></p>
+                                            <p id="uploadSize" class="text-[10px] text-gray-400"></p>
+                                        </div>
+                                    </div>
+                                    <button type="button" onclick="event.stopPropagation(); clearUploadedFile();" class="p-2 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-all" title="Remove image">
+                                        <i class="fa-solid fa-trash-can"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Or Image URL input -->
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xs text-gray-400">or URL:</span>
+                                <input type="url" id="bImage" name="banner_url" oninput="updateLivePreview()" placeholder="https://i.imgur.com/... (optional fallback)" class="flex-1 px-3 py-1.5 rounded-lg bg-black/40 border border-bordercolor text-white text-xs focus:outline-none focus:border-brand-500">
+                            </div>
+                        </div>
+
+                        <div class="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                            <button type="submit" id="publishBtn" class="px-7 py-3 rounded-xl bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white font-semibold text-sm transition-all shadow-lg shadow-brand-600/25 flex items-center justify-center space-x-2">
+                                <i class="fa-solid fa-paper-plane"></i>
+                                <span id="publishBtnText">Publish Post Now</span>
+                            </button>
+                            <div id="broadcastAlert" class="hidden px-4 py-2.5 rounded-xl text-xs font-medium"></div>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Right Column: Interactive Live Discord Preview -->
+                <div class="lg:col-span-5">
+                    <div class="sticky top-6 space-y-3">
+                        <div class="flex items-center justify-between text-xs text-gray-400 px-1">
+                            <span class="font-semibold uppercase tracking-wider flex items-center gap-1.5">
+                                <i class="fa-brands fa-discord text-indigo-400"></i> Discord Live Preview
+                            </span>
+                            <span id="previewChannelLabel" class="text-indigo-300 font-mono">#announcements</span>
+                        </div>
+
+                        <!-- Discord Client Window Frame -->
+                        <div class="bg-[#313338] rounded-2xl border border-[#1e1f22] overflow-hidden shadow-2xl font-sans text-sm">
+                            <!-- Channel Header -->
+                            <div class="bg-[#2b2d31] px-4 py-2.5 border-b border-[#1f2023] flex items-center justify-between">
+                                <div class="flex items-center space-x-2 text-gray-300 font-semibold text-xs">
+                                    <i class="fa-solid fa-hashtag text-gray-400"></i>
+                                    <span id="discordChannelTitle">announcements</span>
+                                </div>
+                                <div class="flex items-center space-x-3 text-gray-400 text-xs">
+                                    <i class="fa-solid fa-bell"></i>
+                                    <i class="fa-solid fa-thumbtack"></i>
+                                    <i class="fa-solid fa-users"></i>
+                                </div>
+                            </div>
+
+                            <!-- Chat Message Area -->
+                            <div class="p-4 space-y-2">
+                                <!-- Message Row -->
+                                <div class="flex items-start space-x-3">
+                                    <!-- Bot Avatar -->
+                                    <div class="w-10 h-10 rounded-full bg-brand-600 flex-shrink-0 flex items-center justify-center text-white font-bold text-sm shadow overflow-hidden">
+                                        {% if guild and guild.icon %}
+                                            <img src="{{ guild.icon }}" alt="Avatar" class="w-full h-full object-cover">
+                                        {% else %}
+                                            <span>EP</span>
+                                        {% endif %}
+                                    </div>
+
+                                    <div class="flex-1 space-y-1.5 overflow-hidden">
+                                        <!-- Header: Name + Badge + Timestamp -->
+                                        <div class="flex items-center space-x-2">
+                                            <span class="font-bold text-white text-sm hover:underline cursor-pointer">Epileptic</span>
+                                            <span class="bg-[#5865F2] text-white text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider">APP</span>
+                                            <span class="text-gray-400 text-[11px]">Today at <span id="previewTime">12:00</span></span>
+                                        </div>
+
+                                        <!-- Mention Display -->
+                                        <div id="previewMentionBadge" class="hidden text-xs">
+                                            <span class="bg-[#5865f2]/20 text-[#c9cdfb] font-medium px-1.5 py-0.5 rounded">@Member</span>
+                                        </div>
+
+                                        <!-- Discord Embed Box -->
+                                        <div id="previewEmbed" class="border-l-4 border-[#A855F7] bg-[#2b2d31] rounded-r-lg p-3.5 space-y-2.5 max-w-full text-xs">
+                                            <!-- Embed Title -->
+                                            <div id="previewTitle" class="text-white font-bold text-sm">
+                                                🚀 DeepSeek 4.1 + Gemini Flash Jailbreaks Released!
+                                            </div>
+
+                                            <!-- Embed Body (Formatted Markdown) -->
+                                            <div id="previewBody" class="text-[#dbdee1] space-y-1.5 leading-relaxed break-words">
+                                                Welcome to the community! Formatted post previews will update live here as you compose your message.
+                                            </div>
+
+                                            <!-- Embed Image Banner -->
+                                            <div id="previewImageContainer" class="hidden pt-1">
+                                                <img id="previewImage" src="" alt="Banner Preview" class="w-full rounded-lg max-h-56 object-cover border border-[#1e1f22]">
+                                            </div>
+
+                                            <!-- Embed Footer -->
+                                            <div class="flex items-center space-x-2 pt-1 border-t border-[#35373c] text-[10px] text-gray-400">
+                                                <div class="w-4 h-4 rounded-full bg-brand-500/20 flex items-center justify-center text-brand-300 text-[9px]">
+                                                    <i class="fa-solid fa-shield"></i>
+                                                </div>
+                                                <span>Epileptic Community Broadcast • Official</span>
+                                            </div>
+                                        </div>
+
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
                     </div>
-
-                    <!-- Color Theme -->
-                    <div>
-                        <label class="block text-xs font-semibold text-gray-300 mb-1.5 uppercase tracking-wider">Color Theme:</label>
-                        <select id="bColor" name="color" class="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-bordercolor text-white text-sm focus:outline-none focus:border-brand-500">
-                            <option value="purple" selected>🟣 Purple (Signature)</option>
-                            <option value="gold">🟡 Gold (Premium VIP)</option>
-                            <option value="green">🟢 Green (Update / Success)</option>
-                            <option value="red">🔴 Red (Alert / Important)</option>
-                            <option value="blue">🔵 Blurple (Info)</option>
-                            <option value="cyan">🌐 Cyan (Cyber)</option>
-                            <option value="dark">⚫ Dark Minimal</option>
-                        </select>
-                    </div>
-
-                    <!-- Mention Role -->
-                    <div>
-                        <label class="block text-xs font-semibold text-gray-300 mb-1.5 uppercase tracking-wider">Mention Audience:</label>
-                        <select id="bMention" name="mention" class="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-bordercolor text-white text-sm focus:outline-none focus:border-brand-500">
-                            <option value="none" selected>No Mention</option>
-                            <option value="member">@Member</option>
-                            <option value="premium">@Premium Member</option>
-                            <option value="here">@here</option>
-                            <option value="everyone">@everyone</option>
-                        </select>
-                    </div>
                 </div>
-
-                <!-- Post Title -->
-                <div>
-                    <label class="block text-xs font-semibold text-gray-300 mb-1.5 uppercase tracking-wider">Post Title (Optional):</label>
-                    <input type="text" id="bTitle" name="title" placeholder="e.g. 🚀 DeepSeek 4.1 + Gemini Flash Jailbreak Released!" class="w-full px-4 py-2.5 rounded-xl bg-black/40 border border-bordercolor text-white text-sm focus:outline-none focus:border-brand-500">
-                </div>
-
-                <!-- Post Content -->
-                <div>
-                    <div class="flex items-center justify-between mb-1.5">
-                        <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wider">Content / Description:</label>
-                        <span class="text-[11px] text-gray-400">Formatting: <code>**bold**</code> • <code>*italic*</code> • <code>> quote</code> • <code>```code```</code></span>
-                    </div>
-                    <textarea id="bContent" name="content" rows="5" required placeholder="Type your announcement, guide, or update here..." class="w-full px-4 py-3 rounded-xl bg-black/40 border border-bordercolor text-white text-sm focus:outline-none focus:border-brand-500 font-sans"></textarea>
-                </div>
-
-                <!-- Banner Image URL -->
-                <div>
-                    <label class="block text-xs font-semibold text-gray-300 mb-1.5 uppercase tracking-wider">Banner Image URL (Optional):</label>
-                    <input type="url" id="bImage" name="banner_url" placeholder="https://i.imgur.com/... or https://example.com/banner.png" class="w-full px-4 py-2.5 rounded-xl bg-black/40 border border-bordercolor text-white text-sm focus:outline-none focus:border-brand-500">
-                </div>
-
-                <div class="flex items-center justify-between pt-2">
-                    <button type="button" onclick="submitBroadcastPost()" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white font-semibold text-sm transition-all shadow-lg shadow-brand-600/20 flex items-center space-x-2">
-                        <i class="fa-solid fa-paper-plane"></i>
-                        <span>Publish Post Now</span>
-                    </button>
-                    <div id="broadcastAlert" class="hidden px-4 py-2 rounded-xl text-xs"></div>
-                </div>
-            </form>
+            </div>
         </div>
 
     </main>
@@ -344,6 +518,250 @@
     </footer>
 
     <script>
+        // Palette Hex Map
+        const COLOR_HEX = {
+            'purple': '#A855F7',
+            'gold': '#FEE75C',
+            'green': '#57F287',
+            'red': '#ED4245',
+            'blue': '#5865F2',
+            'cyan': '#00F0FF',
+            'dark': '#2B2D31'
+        };
+
+        let activeColor = 'purple';
+        let uploadedFileObj = null;
+
+        // Color selection handler
+        function selectColor(colorKey, hexCode) {
+            activeColor = colorKey;
+            document.getElementById('bColor').value = colorKey;
+
+            document.querySelectorAll('.color-btn').forEach(btn => {
+                if (btn.getAttribute('data-color') === colorKey) {
+                    btn.classList.add('border-purple-500', 'bg-purple-500/20');
+                    btn.classList.remove('border-bordercolor', 'bg-black/30');
+                } else {
+                    btn.classList.remove('border-purple-500', 'bg-purple-500/20');
+                    btn.classList.add('border-bordercolor', 'bg-black/30');
+                }
+            });
+
+            const embed = document.getElementById('previewEmbed');
+            embed.style.borderLeftColor = hexCode;
+        }
+
+        // Markdown insertion helper
+        function insertMarkdown(prefix, suffix, placeholder) {
+            const textarea = document.getElementById('bContent');
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const text = textarea.value;
+
+            const selected = text.substring(start, end) || placeholder;
+            const replacement = prefix + selected + suffix;
+
+            textarea.value = text.substring(0, start) + replacement + text.substring(end);
+            textarea.focus();
+            textarea.setSelectionRange(start + prefix.length, start + prefix.length + selected.length);
+            updateLivePreview();
+        }
+
+        // Lightweight safe Discord markdown parser for live preview
+        function escapeHtml(str) {
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function parseDiscordMarkdown(raw) {
+            if (!raw || !raw.trim()) {
+                return '<span class="text-gray-500 italic">No content typed yet...</span>';
+            }
+            let text = escapeHtml(raw);
+
+            // Multiline code ```code```
+            text = text.replace(/```([\s\S]*?)```/g, '<pre class="bg-[#1e1f22] p-2 rounded text-[11px] text-gray-200 overflow-x-auto my-1 font-mono"><code>$1</code></pre>');
+
+            // Inline code `code`
+            text = text.replace(/`([^`]+)`/g, '<code class="bg-[#1e1f22] px-1 py-0.5 rounded text-[11px] text-purple-300 font-mono">$1</code>');
+
+            // Bold **text**
+            text = text.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-bold text-white">$1</strong>');
+
+            // Italic *text*
+            text = text.replace(/\*([^*]+)\*/g, '<em class="italic text-gray-200">$1</em>');
+
+            // Strikethrough ~~text~~
+            text = text.replace(/~~([^~]+)~~/g, '<del class="line-through text-gray-400">$1</del>');
+
+            // Blockquotes > text
+            text = text.replace(/^&gt; (.*)$/gm, '<div class="border-l-2 border-gray-500 pl-2 text-gray-300 italic my-1">$1</div>');
+
+            // Headers ###
+            text = text.replace(/^### (.*)$/gm, '<div class="font-bold text-white text-xs mt-1 mb-0.5">$1</div>');
+            text = text.replace(/^## (.*)$/gm, '<div class="font-bold text-white text-sm mt-1.5 mb-0.5">$1</div>');
+            text = text.replace(/^# (.*)$/gm, '<div class="font-bold text-white text-base mt-2 mb-1">$1</div>');
+
+            // Bullet points
+            text = text.replace(/^• (.*)$/gm, '<div class="flex items-start space-x-1.5"><span class="text-purple-400">•</span><span>$1</span></div>');
+
+            // Links [title](url)
+            text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" class="text-[#00A8FC] hover:underline">$1</a>');
+
+            // Line breaks
+            text = text.replace(/\n/g, '<br>');
+
+            return text;
+        }
+
+        // Update live preview in real time
+        function updateLivePreview() {
+            const channel = document.getElementById('bChannel').value;
+            const mention = document.getElementById('bMention').value;
+            const title = document.getElementById('bTitle').value.trim();
+            const content = document.getElementById('bContent').value;
+            const bannerUrl = document.getElementById('bImage').value.trim();
+
+            document.getElementById('previewChannelLabel').innerText = '#' + channel;
+            document.getElementById('discordChannelTitle').innerText = channel;
+
+            // Mention badge
+            const mentionBadge = document.getElementById('previewMentionBadge');
+            if (mention !== 'none') {
+                mentionBadge.classList.remove('hidden');
+                let tag = '@' + mention;
+                if (mention === 'member') tag = '@Member';
+                if (mention === 'premium') tag = '@Premium Member';
+                mentionBadge.innerHTML = `<span class="bg-[#5865f2]/20 text-[#c9cdfb] font-medium px-1.5 py-0.5 rounded">${tag}</span>`;
+            } else {
+                mentionBadge.classList.add('hidden');
+            }
+
+            // Title
+            const titleEl = document.getElementById('previewTitle');
+            if (title) {
+                titleEl.innerText = title;
+                titleEl.classList.remove('hidden');
+            } else {
+                titleEl.classList.add('hidden');
+            }
+
+            // Body
+            document.getElementById('previewBody').innerHTML = parseDiscordMarkdown(content);
+
+            // Image: file or url
+            const imgContainer = document.getElementById('previewImageContainer');
+            const imgEl = document.getElementById('previewImage');
+
+            if (uploadedFileObj) {
+                imgContainer.classList.remove('hidden');
+            } else if (bannerUrl) {
+                imgEl.src = bannerUrl;
+                imgContainer.classList.remove('hidden');
+            } else {
+                imgContainer.classList.add('hidden');
+            }
+        }
+
+        // File upload selection handler
+        function handleFileSelect(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            if (file.size > 10 * 1024 * 1024) {
+                alert("File size exceeds 10MB limit.");
+                clearUploadedFile();
+                return;
+            }
+
+            uploadedFileObj = file;
+
+            // Thumbnail preview
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                document.getElementById('uploadThumb').src = evt.target.result;
+                document.getElementById('previewImage').src = evt.target.result;
+                document.getElementById('uploadName').innerText = file.name;
+                document.getElementById('uploadSize').innerText = (file.size / 1024 / 1024).toFixed(2) + ' MB';
+                document.getElementById('uploadPrompt').classList.add('hidden');
+                document.getElementById('uploadPreview').classList.remove('hidden');
+                updateLivePreview();
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function clearUploadedFile() {
+            uploadedFileObj = null;
+            document.getElementById('bImageFile').value = '';
+            document.getElementById('uploadPrompt').classList.remove('hidden');
+            document.getElementById('uploadPreview').classList.add('hidden');
+            document.getElementById('previewImage').src = '';
+            updateLivePreview();
+        }
+
+        // Form submission via AJAX FormData
+        async function submitBroadcastPost() {
+            const channel = document.getElementById('bChannel').value;
+            const color = activeColor;
+            const mention = document.getElementById('bMention').value;
+            const title = document.getElementById('bTitle').value.trim();
+            const content = document.getElementById('bContent').value.trim();
+            const bannerUrl = document.getElementById('bImage').value.trim();
+            const alertBox = document.getElementById('broadcastAlert');
+            const publishBtn = document.getElementById('publishBtn');
+            const publishBtnText = document.getElementById('publishBtnText');
+
+            if (!content) {
+                alertBox.className = "p-3 rounded-xl text-xs bg-rose-950/60 border border-rose-500/30 text-rose-300";
+                alertBox.innerText = "Please write content/description before publishing.";
+                alertBox.classList.remove('hidden');
+                return;
+            }
+
+            publishBtn.disabled = true;
+            publishBtnText.innerText = "Publishing to Discord...";
+            alertBox.className = "p-3 rounded-xl text-xs bg-gray-800 text-gray-200";
+            alertBox.innerText = "Uploading payload and broadcasting...";
+            alertBox.classList.remove('hidden');
+
+            try {
+                const formData = new FormData();
+                formData.append('channel_name', channel);
+                formData.append('color', color);
+                formData.append('mention', mention);
+                formData.append('title', title);
+                formData.append('content', content);
+                formData.append('banner_url', bannerUrl);
+
+                if (uploadedFileObj) {
+                    formData.append('image_file', uploadedFileObj);
+                }
+
+                const response = await fetch('/api/action/broadcast_post', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    alertBox.className = "p-3 rounded-xl text-xs bg-emerald-950/60 border border-emerald-500/30 text-emerald-300";
+                    alertBox.innerHTML = `<i class="fa-solid fa-circle-check mr-1.5"></i> ${result.message}`;
+                    document.getElementById('bTitle').value = '';
+                    document.getElementById('bContent').value = '';
+                    document.getElementById('bImage').value = '';
+                    clearUploadedFile();
+                } else {
+                    alertBox.className = "p-3 rounded-xl text-xs bg-rose-950/60 border border-rose-500/30 text-rose-300";
+                    alertBox.innerText = "Error: " + (result.error || "Failed to publish post.");
+                }
+            } catch (err) {
+                alertBox.className = "p-3 rounded-xl text-xs bg-rose-950/60 border border-rose-500/30 text-rose-300";
+                alertBox.innerText = "Connection error: " + err.message;
+            } finally {
+                publishBtn.disabled = false;
+                publishBtnText.innerText = "Publish Post Now";
+            }
+        }
+
         async function submitVerifyMessage() {
             const channelInput = document.getElementById('channelNameInput');
             const alertBox = document.getElementById('verifyAlert');
@@ -376,56 +794,10 @@
             }
         }
 
-        async function submitBroadcastPost() {
-            const channel = document.getElementById('bChannel').value;
-            const color = document.getElementById('bColor').value;
-            const mention = document.getElementById('bMention').value;
-            const title = document.getElementById('bTitle').value.trim();
-            const content = document.getElementById('bContent').value.trim();
-            const bannerUrl = document.getElementById('bImage').value.trim();
-            const alertBox = document.getElementById('broadcastAlert');
-
-            if (!content) {
-                alertBox.className = "p-3 rounded-lg text-xs bg-rose-950/60 border border-rose-500/30 text-rose-300";
-                alertBox.innerText = "Please enter post content before publishing.";
-                alertBox.classList.remove('hidden');
-                return;
-            }
-
-            alertBox.className = "p-3 rounded-lg text-xs bg-gray-800 text-gray-200";
-            alertBox.innerText = "Publishing post to #" + channel + "...";
-            alertBox.classList.remove('hidden');
-
-            try {
-                const formData = new FormData();
-                formData.append('channel_name', channel);
-                formData.append('color', color);
-                formData.append('mention', mention);
-                formData.append('title', title);
-                formData.append('content', content);
-                formData.append('banner_url', bannerUrl);
-
-                const response = await fetch('/api/action/broadcast_post', {
-                    method: 'POST',
-                    body: formData
-                });
-                const result = await response.json();
-
-                if (result.success) {
-                    alertBox.className = "p-3 rounded-lg text-xs bg-emerald-950/60 border border-emerald-500/30 text-emerald-300";
-                    alertBox.innerText = result.message;
-                    document.getElementById('bTitle').value = '';
-                    document.getElementById('bContent').value = '';
-                    document.getElementById('bImage').value = '';
-                } else {
-                    alertBox.className = "p-3 rounded-lg text-xs bg-rose-950/60 border border-rose-500/30 text-rose-300";
-                    alertBox.innerText = "Error: " + (result.error || "Failed to publish post.");
-                }
-            } catch (err) {
-                alertBox.className = "p-3 rounded-lg text-xs bg-rose-950/60 border border-rose-500/30 text-rose-300";
-                alertBox.innerText = "Connection error: " + err.message;
-            }
-        }
+        // Set current time in preview
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        document.getElementById('previewTime').innerText = timeStr;
     </script>
 </body>
 </html>

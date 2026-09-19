@@ -1,10 +1,11 @@
 import os
+import io
 import math
 import time
 import secrets
 from pathlib import Path
 import discord
-from fastapi import FastAPI, Request, Form, Depends, HTTPException, status, Response
+from fastapi import FastAPI, Request, Form, File, UploadFile, Depends, HTTPException, status, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -205,7 +206,8 @@ async def api_broadcast_post(
     content: str = Form(...),
     color: str = Form("purple"),
     banner_url: str = Form(""),
-    mention: str = Form("none")
+    mention: str = Form("none"),
+    image_file: UploadFile = File(None)
 ):
     if not is_authenticated(request):
         return JSONResponse({"success": False, "error": "Unauthorized. Please log in."}, status_code=401)
@@ -239,10 +241,21 @@ async def api_broadcast_post(
     )
     if title.strip():
         embed.title = title.strip()
-    if banner_url.strip():
-        embed.set_image(url=banner_url.strip())
 
-    embed.set_footer(text="Epileptic Community Broadcast • Official")
+    footer_icon = str(bot.user.display_avatar.url) if bot.user else (str(guild.icon.url) if guild.icon else None)
+    embed.set_footer(text="Epileptic Community Broadcast • Official", icon_url=footer_icon)
+
+    discord_file = None
+    if image_file and image_file.filename:
+        file_bytes = await image_file.read()
+        if len(file_bytes) > 0:
+            if len(file_bytes) > 10 * 1024 * 1024:
+                return JSONResponse({"success": False, "error": "Uploaded image exceeds 10MB limit."}, status_code=400)
+            safe_filename = "attachment_" + Path(image_file.filename).name.replace(" ", "_")
+            discord_file = discord.File(io.BytesIO(file_bytes), filename=safe_filename)
+            embed.set_image(url=f"attachment://{safe_filename}")
+    elif banner_url.strip():
+        embed.set_image(url=banner_url.strip())
 
     content_mention = None
     if mention == "everyone":
@@ -257,7 +270,10 @@ async def api_broadcast_post(
         content_mention = p_role.mention if p_role else None
 
     try:
-        msg = await target_channel.send(content=content_mention, embed=embed)
+        if discord_file:
+            msg = await target_channel.send(content=content_mention, embed=embed, file=discord_file)
+        else:
+            msg = await target_channel.send(content=content_mention, embed=embed)
         return {"success": True, "message": f"Post successfully published to #{target_channel.name}!"}
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
