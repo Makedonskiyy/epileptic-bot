@@ -133,6 +133,23 @@ def is_staff():
     return app_commands.check(predicate)
 
 
+def is_owner():
+    """Кастомный предикат безопасности: команда доступна ИСКЛЮЧИТЕЛЬНО владельцу сервера."""
+    async def predicate(interaction: discord.Interaction) -> bool:
+        if not interaction.guild:
+            return False
+        if interaction.user.id == interaction.guild.owner_id:
+            return True
+        await interaction.response.send_message(
+            "⛔ **Access Denied:** Only the Server Owner can execute this critical setup command.",
+            ephemeral=True
+        )
+        return False
+
+    return app_commands.check(predicate)
+
+
+
 class SecurityCog(commands.Cog, name="Security"):
     """Модуль безопасности: аудит действий и защита от рейдов."""
 

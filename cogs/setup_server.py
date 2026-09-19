@@ -4,7 +4,7 @@ from discord import app_commands
 from discord.ext import commands
 import config
 from cogs.verification import find_role_by_key
-from cogs.security import is_staff, send_mod_log
+from cogs.security import is_staff, is_owner, send_mod_log
 
 logger = logging.getLogger("epileptic.setup")
 
@@ -31,9 +31,9 @@ class SetupServerCog(commands.Cog, name="Server Setup"):
 
     @app_commands.command(
         name="setup_permissions",
-        description="Apply permission isolation to existing categories (INFORMATION, COMMUNITY, PREMIUM, STAFF, etc.)."
+        description="Apply permission isolation to existing categories (Owner only)."
     )
-    @is_staff()
+    @is_owner()
     async def setup_permissions(self, interaction: discord.Interaction):
         """Synchronizes permissions across all categories based on community access levels."""
         await interaction.response.defer(ephemeral=True)
@@ -265,9 +265,9 @@ class SetupServerCog(commands.Cog, name="Server Setup"):
 
     @app_commands.command(
         name="assign_unverified_all",
-        description="Assign the Not Verified role to all members who currently lack the Member role."
+        description="Assign the Not Verified role to all members who currently lack the Member role (Owner only)."
     )
-    @is_staff()
+    @is_owner()
     async def assign_unverified_all(self, interaction: discord.Interaction):
         """Assigns Not Verified role to existing unverified members."""
         await interaction.response.defer(ephemeral=True)
