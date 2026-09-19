@@ -126,7 +126,8 @@ async def dashboard_home(request: Request):
                 "premium_count": len(premium_role.members) if premium_role else 0,
                 "channels_count": len(guild.channels),
                 "roles_count": len(guild.roles),
-                "categories": [c.name for c in guild.categories]
+                "categories": [c.name for c in guild.categories],
+                "text_channels": [c.name for c in guild.text_channels]
             }
 
     status_info = {
@@ -194,3 +195,70 @@ async def api_post_verify(request: Request, channel_name: str = Form("rules")):
         return {"success": True, "message": f"Server rules successfully posted to #{target_channel.name} with reaction verification!"}
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/action/broadcast_post")
+async def api_broadcast_post(
+    request: Request,
+    channel_name: str = Form(...),
+    title: str = Form(""),
+    content: str = Form(...),
+    color: str = Form("purple"),
+    banner_url: str = Form(""),
+    mention: str = Form("none")
+):
+    if not is_authenticated(request):
+        return JSONResponse({"success": False, "error": "Unauthorized. Please log in."}, status_code=401)
+
+    bot = get_bot(request)
+    if not bot or not bot.is_ready():
+        return JSONResponse({"success": False, "error": "Bot is not connected to Discord."}, status_code=503)
+
+    guild = bot.get_guild(config.GUILD_ID) if config.GUILD_ID else (bot.guilds[0] if bot.guilds else None)
+    if not guild:
+        return JSONResponse({"success": False, "error": "Guild not found."}, status_code=404)
+
+    target_channel = discord.utils.find(lambda c: channel_name.lower() in c.name.lower(), guild.text_channels)
+    if not target_channel:
+        return JSONResponse({"success": False, "error": f"Channel '{channel_name}' not found."}, status_code=404)
+
+    color_palette = {
+        "purple": config.RULES_EMBED_COLOR,
+        "gold": 0xFEE75C,
+        "green": 0x57F287,
+        "red": 0xED4245,
+        "blue": 0x5865F2,
+        "cyan": 0x00F0FF,
+        "dark": 0x2B2D31
+    }
+    hex_color = color_palette.get(color.lower(), config.RULES_EMBED_COLOR)
+
+    embed = discord.Embed(
+        description=content.replace("\\n", "\n"),
+        color=hex_color
+    )
+    if title.strip():
+        embed.title = title.strip()
+    if banner_url.strip():
+        embed.set_image(url=banner_url.strip())
+
+    embed.set_footer(text="Epileptic Community Broadcast • Official")
+
+    content_mention = None
+    if mention == "everyone":
+        content_mention = "@everyone"
+    elif mention == "here":
+        content_mention = "@here"
+    elif mention == "member":
+        m_role = discord.utils.find(lambda r: r.name.lower() == config.MEMBER_ROLE_NAME.lower(), guild.roles)
+        content_mention = m_role.mention if m_role else None
+    elif mention == "premium":
+        p_role = discord.utils.find(lambda r: r.name.lower() == config.PREMIUM_ROLE_NAME.lower(), guild.roles)
+        content_mention = p_role.mention if p_role else None
+
+    try:
+        msg = await target_channel.send(content=content_mention, embed=embed)
+        return {"success": True, "message": f"Post successfully published to #{target_channel.name}!"}
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
