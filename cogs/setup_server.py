@@ -65,6 +65,9 @@ class SetupServerCog(commands.Cog, name="Server Setup"):
                     guild.default_role: discord.PermissionOverwrite(
                         view_channel=True,
                         send_messages=False,
+                        send_messages_in_threads=False,
+                        create_public_threads=False,
+                        create_private_threads=False,
                         read_messages=True,
                         read_message_history=True,
                         add_reactions=False
@@ -74,18 +77,26 @@ class SetupServerCog(commands.Cog, name="Server Setup"):
                     overwrites[not_verified_role] = discord.PermissionOverwrite(
                         view_channel=True,
                         send_messages=False,
+                        send_messages_in_threads=False,
+                        create_public_threads=False,
+                        create_private_threads=False,
                         read_messages=True,
                         read_message_history=True,
                         add_reactions=False
                     )
-                if member_role:
-                    overwrites[member_role] = discord.PermissionOverwrite(
+
+                for r in general_members:
+                    overwrites[r] = discord.PermissionOverwrite(
                         view_channel=True,
                         send_messages=False,
+                        send_messages_in_threads=False,
+                        create_public_threads=False,
+                        create_private_threads=False,
                         read_messages=True,
                         read_message_history=True,
-                        add_reactions=True
+                        add_reactions=False
                     )
+
                 for s in staff_roles:
                     overwrites[s] = discord.PermissionOverwrite(
                         view_channel=True,
@@ -97,7 +108,7 @@ class SetupServerCog(commands.Cog, name="Server Setup"):
                 await category.edit(overwrites=overwrites)
                 for ch in category.channels:
                     await ch.edit(sync_permissions=True)
-                updated_categories.append(f"📁 **{category.name}** (Public read-only, locked from chatter)")
+                updated_categories.append(f"📁 **{category.name}** (Strict read-only for members, no writing)")
 
             # 2. PREMIUM category
             elif "PREMIUM" in cat_name or "ПРЕМИУМ" in cat_name or "VIP" in cat_name:
