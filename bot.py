@@ -90,11 +90,8 @@ class EpilepticBot(commands.Bot):
         logger.info(f"Gateway Latency: {round(self.latency * 1000, 1)} ms")
         logger.info("==================================================")
 
-        activity = discord.Activity(
-            type=discord.ActivityType.watching,
-            name="Epileptic Community | /post_verification"
-        )
-        await self.change_presence(status=discord.Status.online, activity=activity)
+        # Clean online status without custom activity text
+        await self.change_presence(status=discord.Status.online, activity=None)
 
 
 def is_valid_token(token: str) -> bool:
