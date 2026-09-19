@@ -162,8 +162,53 @@ class SetupServerCog(commands.Cog, name="Server Setup"):
                     await ch.edit(sync_permissions=True)
                 updated_categories.append(f"🛡️ **{category.name}** (Private to Staff only)")
 
-            # 4. Community categories: COMMUNITY, RESOURCES, LOUNGE, SUPPORT
-            elif any(kw in cat_name for kw in ["COMMUNITY", "КОМЬЮНИТИ", "RESOURCES", "РЕСУРСЫ", "LOUNGE", "ЛАУНЖ", "SUPPORT", "САППОРТ"]):
+            # 4. SUPPORT category (FAQ and Ticket panel read-only for members, staff can post)
+            elif "SUPPORT" in cat_name or "САППОРТ" in cat_name:
+                overwrites = {
+                    guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                }
+                if not_verified_role:
+                    overwrites[not_verified_role] = discord.PermissionOverwrite(view_channel=False)
+
+                for r in general_members:
+                    overwrites[r] = discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=True,
+                        read_messages=True,
+                        read_message_history=True,
+                        attach_files=True
+                    )
+
+                for s in staff_roles:
+                    overwrites[s] = discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=True,
+                        manage_messages=True,
+                        read_message_history=True
+                    )
+
+                await category.edit(overwrites=overwrites)
+                # Specific channel locks inside SUPPORT
+                for ch in category.channels:
+                    ch_name_lower = ch.name.lower()
+                    if "faq" in ch_name_lower or "ticket" in ch_name_lower:
+                        # Members can view & read history, but cannot send messages
+                        ch_overwrites = dict(ch.overwrites)
+                        for r in general_members:
+                            ch_overwrites[r] = discord.PermissionOverwrite(
+                                view_channel=True,
+                                send_messages=False,
+                                read_messages=True,
+                                read_message_history=True
+                            )
+                        await ch.edit(overwrites=ch_overwrites)
+                    else:
+                        await ch.edit(sync_permissions=True)
+
+                updated_categories.append(f"🎫 **{category.name}** (FAQ/Tickets read-only for members, staff managed)")
+
+            # 5. Community categories: COMMUNITY, RESOURCES, LOUNGE
+            elif any(kw in cat_name for kw in ["COMMUNITY", "КОМЬЮНИТИ", "RESOURCES", "РЕСУРСЫ", "LOUNGE", "ЛАУНЖ"]):
                 overwrites = {
                     guild.default_role: discord.PermissionOverwrite(view_channel=False),
                 }

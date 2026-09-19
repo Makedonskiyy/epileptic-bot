@@ -48,6 +48,11 @@ EMBED_COLOR_WARNING = 0xFEE75C    # Yellow
 EMBED_COLOR_ERROR = 0xED4245      # Red
 EMBED_COLOR_PREMIUM = 0xFEE75C    # Gold
 
+# Verification UI Button settings
+VERIFY_BUTTON_LABEL = "Accept Rules & Get Access"
+VERIFY_BUTTON_EMOJI = "✅"
+VERIFY_CUSTOM_ID = "epileptic:persistent:verify_button"
+
 # Official Server Rules (Exact layout from community screenshot)
 RULES_EMBED_COLOR = 0xA855F7      # Vibrant Purple matching server rules stripe
 

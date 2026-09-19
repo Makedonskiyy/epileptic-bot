@@ -1,3 +1,4 @@
+import re
 import time
 import logging
 from collections import deque
@@ -8,6 +9,12 @@ from discord.ext import commands
 import config
 
 logger = logging.getLogger("epileptic.security")
+
+# Регулярное выражение для поиска ссылок-приглашений Discord (discord.gg, discord.com/invite, etc.)
+DISCORD_INVITE_REGEX = re.compile(
+    r"(?:https?:\/\/)?(?:www\.)?(?:discord\.(?:gg|io|me|li)|discordapp\.com\/invite|discord\.com\/invite)\/[a-zA-Z0-9\-]+",
+    re.IGNORECASE
+)
 
 
 class SecurityManager:
@@ -152,6 +159,58 @@ class SecurityCog(commands.Cog, name="Security"):
             await send_mod_log(guild, alert_embed)
             logger.warning(f"Raid alert triggered on guild {guild.name} ({guild.id})!")
 
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        """Anti-Invite Link Filter: Deletes unauthorized Discord invite links from non-staff."""
+        if not message.guild or message.author.bot:
+            return
+
+        # Разрешено персоналу
+        is_staff_author = (
+            message.author.id == message.guild.owner_id
+            or message.author.guild_permissions.administrator
+            or any(r.name.lower() in config.STAFF_ROLE_NAMES for r in message.author.roles)
+        )
+        if is_staff_author:
+            return
+
+        # Проверка на наличие ссылок-приглашений Discord
+        match = DISCORD_INVITE_REGEX.search(message.content)
+        if match:
+            try:
+                await message.delete()
+            except discord.Forbidden:
+                logger.warning(f"Failed to delete invite from {message.author}: missing permissions.")
+                return
+            except Exception as e:
+                logger.error(f"Error deleting invite message: {e}")
+                return
+
+            # Временное предупреждение в чате с автоудалением
+            try:
+                warn_msg = await message.channel.send(
+                    f"⚠️ {message.author.mention}, posting Discord invite links is strictly prohibited by server rules!"
+                )
+                await asyncio.sleep(7)
+                await warn_msg.delete()
+            except Exception:
+                pass
+
+            # Логирование в mod-logs
+            log_embed = discord.Embed(
+                title="🚫 [ANTI-INVITE] Invite Link Deleted",
+                description=(
+                    f"**User:** {message.author.mention} (`{message.author.id}`)\n"
+                    f"**Channel:** {message.channel.mention}\n"
+                    f"**Detected Link:** `{match.group(0)}`\n"
+                    f"**Message:** ```{message.content[:500]}```"
+                ),
+                color=config.EMBED_COLOR_ERROR
+            )
+            await send_mod_log(message.guild, log_embed)
+            logger.info(f"Deleted unauthorized invite link from {message.author} in #{message.channel.name}")
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(SecurityCog(bot))
+

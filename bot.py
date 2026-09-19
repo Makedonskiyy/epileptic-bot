@@ -17,6 +17,7 @@ if sys.platform == "win32":
 
 import config
 from cogs.verification import PersistentVerificationView
+from cogs.tickets import TicketLaunchView, TicketControlView
 from web.server import app as web_app
 
 # Logging Configuration
@@ -49,11 +50,14 @@ class EpilepticBot(commands.Bot):
         """Pre-connection initialization hook."""
         logger.info("Registering persistent UI views...")
         self.add_view(PersistentVerificationView())
+        self.add_view(TicketLaunchView())
+        self.add_view(TicketControlView())
 
         # Load Cogs
         initial_extensions = [
             "cogs.security",
             "cogs.verification",
+            "cogs.tickets",
             "cogs.setup_server",
             "cogs.moderation"
         ]
