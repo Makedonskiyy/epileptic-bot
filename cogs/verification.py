@@ -217,7 +217,7 @@ class VerificationCog(commands.Cog, name="Verification"):
                     icon_url=guild.icon.url if guild.icon else None
                 )
 
-                await welcome_channel.send(content=f"👋 {member.mention}", embed=embed)
+                await welcome_channel.send(embed=embed)
             except Exception as e:
                 logger.warning(f"Failed to post welcome message in {welcome_channel.name}: {e}")
 
