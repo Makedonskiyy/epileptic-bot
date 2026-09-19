@@ -186,24 +186,38 @@ class VerificationCog(commands.Cog, name="Verification"):
             lambda c: any(kw in c.name.lower() for kw in ["rules", "правил"]),
             guild.text_channels
         )
-        rules_mention = rules_channel.mention if rules_channel else "#rules"
+        access_channel = discord.utils.find(
+            lambda c: any(kw in c.name.lower() for kw in ["get-access", "access", "premium", "платн"]),
+            guild.text_channels
+        )
+
+        rules_mention = rules_channel.mention if rules_channel else "📜・rules"
+        access_mention = access_channel.mention if access_channel else "⚡・get-access"
 
         if welcome_channel:
             try:
+                welcome_text = (
+                    f"Hey {member.mention}, welcome to **Epileptic Community**! 👋\n\n"
+                    f"Glad to have you here! Before diving in, take a second to look around:\n\n"
+                    f"📜 Make sure to check out {rules_mention} to keep things chill.\n"
+                    f"🧭 Feel free to explore the server, we have tons of useful resources, tools, and info waiting for you.\n"
+                    f"💬 Drop by the general chats to vibe and connect with like-minded people!\n\n"
+                    f"💎 **Looking for exclusive stuff?**\n"
+                    f"Grab premium access right here ➔ {access_mention}\n\n"
+                    f"Enjoy your stay!"
+                )
+
                 embed = discord.Embed(
-                    title=f"👋 Welcome to {guild.name}, {member.display_name}!",
-                    description=(
-                        f"Glad to have you here, {member.mention}!\n\n"
-                        f"📌 **Getting Started:**\n"
-                        f"1. Head over to {rules_mention}.\n"
-                        f"2. Read through our community guidelines.\n"
-                        f"3. Click the green **«Accept Rules & Get Access»** button to unlock all channels!"
-                    ),
-                    color=config.EMBED_COLOR_DEFAULT
+                    description=welcome_text,
+                    color=config.RULES_EMBED_COLOR
                 )
                 embed.set_thumbnail(url=member.display_avatar.url)
-                embed.set_footer(text=f"Member #{guild.member_count}")
-                await welcome_channel.send(content=f"Welcome {member.mention}!", embed=embed)
+                embed.set_footer(
+                    text=f"Member #{guild.member_count}",
+                    icon_url=guild.icon.url if guild.icon else None
+                )
+
+                await welcome_channel.send(content=f"👋 {member.mention}", embed=embed)
             except Exception as e:
                 logger.warning(f"Failed to post welcome message in {welcome_channel.name}: {e}")
 
