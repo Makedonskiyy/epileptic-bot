@@ -1,143 +1,98 @@
-# 🛡️ Epileptic Discord Bot (Security Reinforced)
+# 🛡️ Epileptic Discord Community Bot
 
-A robust, English-first Discord community administration bot built with Python (**discord.py 2.x**), an authenticated Web Dashboard (**FastAPI**), automated channel permission isolation, and layered anti-abuse / anti-raid security guards.
-
----
-
-## 🌟 Key Features
-
-1. **Automated Verification System**:
-   - New members immediately receive the `@Not Verified` role upon joining.
-   - Non-verified users can only view the **INFORMATION** category (`📜・rules`, `📢・announcements`, `👋・welcome`, `⚡・get-access`) and cannot send messages.
-   - Posts a clean rules embed with a persistent **«Accept Rules & Get Access»** button (and fallback `✅` reaction support).
-   - Upon verification: grants `@Member` role, strips `@Not Verified`, unlocks the community channels, and audits the event to `📊・mod-logs`.
-
-2. **Multi-Layer Anti-Abuse & Anti-Raid Protection**:
-   - 🛡️ **Account Age Filter (`MIN_ACCOUNT_AGE_HOURS=24`)**: Blocks freshly created throwaway alt/raid accounts from verifying automatically. Young accounts are notified and logged in `#mod-logs`.
-   - ⏳ **Interaction Rate Limiting (`VERIFY_COOLDOWN_SECONDS=10`)**: Enforces per-user cooldowns to prevent event loop starvation and Discord API spamming.
-   - 🚨 **Join Flood / Anti-Raid Guard**: Detects rapid bursts of member joins and sounds an emergency alert in `📊・mod-logs`.
-   - 🔒 **Staff Privilege Guard (`@is_staff()`)**: Double-checks administrative commands on the bot side against `Owner`, `Administrator`, and `Moderator` roles, preventing permission bypasses.
-   - 📊 **Audit Logging**: Logs verifications, role syncs, purges, and security events to `📊・mod-logs`.
-
-3. **Secure Web Control Dashboard (Port 8080)**:
-   - Protected by timing-safe session authentication (`admin` / `epileptic_admin_2026`).
-   - Unauthorized POST actions and dashboard views are blocked (HTTP 401).
-   - Real-time member statistics, bot gateway latency, and one-click rules dispatch.
-
-4. **One-Click Server Configuration**:
-   - `/setup_permissions` — automatically configures channel overwrites for INFORMATION, COMMUNITY, RESOURCES, PREMIUM, LOUNGE, SUPPORT, and STAFF.
-   - `/post_verification` — dispatches the rules embed and interactive verification button.
-   - `/assign_unverified_all` — bulk-assigns `@Not Verified` to members who don't have `@Member` yet.
-   - `/purge` — cleans up messages with audit logging.
-   - `/serverinfo` — server statistics overview.
+An advanced, English-first Discord community management & security bot built with Python (**discord.py 2.x**), featuring an authenticated Web Control Dashboard (**FastAPI**), automated category permission isolation, interactive verification, a private support ticket desk, and layered anti-abuse / anti-raid protection.
 
 ---
 
-## 📋 Step 1: Discord Developer Portal Setup
+## 📁 Project Architecture & Components Map
 
-1. Open the [Discord Developer Portal](https://discord.com/developers/applications).
-2. Click **New Application**, name it **Epileptic**, and click **Create**.
-3. **App Avatar**:
-   - Under **General Information**, upload an avatar (assets are available in `upload/styles/Detroit/images/`).
-4. **Bot Configuration**:
-   - Go to the **Bot** tab.
-   - Click **Reset Token** and copy the token into your `.env` file (`DISCORD_TOKEN`).
-   - Scroll down to **Privileged Gateway Intents** and enable:
-     - ✅ **SERVER MEMBERS INTENT** (Mandatory for tracking joins and role assignments).
-     - ✅ **MESSAGE CONTENT INTENT** (Mandatory for command processing).
-   - Click **Save Changes**.
-5. **Invite the Bot to your Server**:
-   - Go to **OAuth2 -> URL Generator**.
+| Directory / File | Component | Description |
+| :--- | :--- | :--- |
+| [`bot.py`](file:///d:/ds%20bot/bot.py) | **Core Engine** | Main entrypoint. Initializes Discord intents, registers persistent interactive Views (survives reboots), registers slash commands, and runs both Discord Bot and FastAPI Web Server concurrently in asyncio. |
+| [`config.py`](file:///d:/ds%20bot/config.py) | **Central Config** | Holds all server role configurations (`Not Verified`, `Member`, `Premium Member`), exact rules text, category mappings, colors, and security limits. |
+| [`cogs/verification.py`](file:///d:/ds%20bot/cogs/verification.py) | **Verification & Welcome** | Manages member onboarding: auto-assigns `@Not Verified` on join, posts dynamic welcome in `👋・welcome`, listens for `✅` reaction clicks, verifies account age, assigns `@Member`, and strips `@Not Verified`. |
+| [`cogs/tickets.py`](file:///d:/ds%20bot/cogs/tickets.py) | **Support Desk** | Handles private 1-on-1 support tickets in `SUPPORT`: button to create ticket, sets private channel overwrites (User + Staff), embeds greeting, limits 1 ticket per user, and provides a 5-second countdown `🔒 Close Ticket` button. |
+| [`cogs/security.py`](file:///d:/ds%20bot/cogs/security.py) | **Anti-Abuse Guard** | Multi-layer protection: **Anti-Invite link filter** (auto-deletes external Discord invites from non-staff), **Anti-Raid join flood monitor**, **Account age filter** (blocks throwaway bots), and role security decorators (`@is_owner()`, `@is_staff()`). |
+| [`cogs/setup_server.py`](file:///d:/ds%20bot/cogs/setup_server.py) | **Architecture Setup** | Owner-only command suite to configure category permissions, channel overrides, and bulk unverified member synchronization. |
+| [`cogs/moderation.py`](file:///d:/ds%20bot/cogs/moderation.py) | **Moderation & Stats** | Staff commands: `/purge` (bulk message cleanup with audit logging) and `/serverinfo` (live member & role breakdown). |
+| [`web/server.py`](file:///d:/ds%20bot/web/server.py) | **Web Dashboard API** | FastAPI web server on port `8080` with timing-safe login authentication, CSRF/session cookies, server stats, and remote rules dispatch. |
+| [`web/templates/`](file:///d:/ds%20bot/web/templates/) | **Dashboard UI** | Modern dark-themed dashboard (`index.html`) and login screen (`login.html`) built with Tailwind CSS and FontAwesome. |
+| [`deploy/`](file:///d:/ds%20bot/deploy/) | **VPS Deployment** | Systemd unit configuration (`epileptic.service`), automated bash installer (`setup_vps.sh`), and Docker setup. |
+
+---
+
+## 📜 Complete Command Reference
+
+| Slash Command | Access Level | Recommended Channel | What It Does & How to Use |
+| :--- | :--- | :--- | :--- |
+| **`/setup_permissions`** | 👑 **Owner Only** | Any staff / admin channel | Automatically isolates all categories (**INFORMATION**, **COMMUNITY**, **RESOURCES**, **PREMIUM**, **LOUNGE**, **SUPPORT**, **STAFF**). Configures `@everyone`, `@Not Verified`, `@Member`, `@Premium Member`, and Staff overwrites in 1 click. |
+| **`/post_verification`** | 🛡️ **Staff / Owner** | `📜・rules` | Posts the 12 official server rules in a sleek purple embed and automatically adds the **`✅` reaction**. Users click `✅` to verify. Option `with_button: True` also adds a green UI button if desired. |
+| **`/post_ticket_panel`** | 🛡️ **Staff / Owner** | `🎫・support-tickets` | Publishes the persistent **«🎫 Open Support Ticket»** panel. When clicked, creates a private channel (e.g. `#ticket-username`) visible only to that member and staff. |
+| **`/assign_unverified_all`** | 👑 **Owner Only** | Any staff channel | Scans the server and assigns `@Not Verified` to any existing members who do not currently possess `@Member` or Staff roles. Ideal for server setup synchronization. |
+| **`/purge <amount>`** | 🛡️ **Staff / Owner** | Any text channel | Bulk deletes `1-100` recent messages in the channel and sends an audit log to `📊・mod-logs`. |
+| **`/serverinfo`** | 👥 **Everyone** | Any text channel | Displays a live summary: owner, total member count, and breakdown of `@Not Verified`, `@Member`, and `@Premium Member` roles. |
+
+---
+
+## 🔒 Security & Anti-Abuse Systems
+
+1. **Owner-Only Guard (`@is_owner()`)**:
+   - Critical server structure commands (`/setup_permissions`, `/assign_unverified_all`) are strictly locked to the **Server Owner**. Even administrators or rogue bots cannot trigger them.
+2. **Anti-Invite Link Filter**:
+   - Automatically detects and deletes unauthorized Discord server invites (`discord.gg/...`, `discord.com/invite/...`) sent by regular members.
+   - Posts a 7-second self-destructing warning in chat and logs the infraction to `📊・mod-logs`.
+   - Staff members are exempt and can post links freely.
+3. **Anti-Alt Account Age Guard (`MIN_ACCOUNT_AGE_HOURS=24`)**:
+   - Accounts younger than 24 hours cannot instantly self-verify. This prevents raid bots from creating throwaways to bypass verification.
+4. **Interaction Rate Limiting (10s Cooldown)**:
+   - Prevents button and reaction spamming from flooding the Discord API or freezing the bot.
+5. **Anti-Raid Join Burst Detector**:
+   - If more than 10 accounts join within 15 seconds, sounds an emergency alert in `📊・mod-logs`.
+6. **Web Dashboard Authentication**:
+   - Web interface (`http://IP:8080`) is locked behind username & password authentication with timing-safe comparison to prevent brute-force attacks.
+
+---
+
+## 🚀 Setup & Deployment Guide
+
+### 1. Developer Portal Setup
+1. Open [Discord Developer Portal](https://discord.com/developers/applications) -> Your Bot -> **Bot** tab.
+2. Enable **Privileged Gateway Intents**:
+   - ✅ **SERVER MEMBERS INTENT** *(Required for join events)*
+   - ✅ **MESSAGE CONTENT INTENT** *(Required for command parsing & anti-invite)*
+3. Go to **OAuth2 -> URL Generator**:
    - Check `bot` and `applications.commands`.
-   - Under **Bot Permissions**, select `Administrator` (or *Manage Roles, Manage Channels, View Channels, Send Messages, Embed Links*).
-   - Open the generated URL and invite the bot to your server.
+   - Permissions: `Administrator`.
+   - Copy URL and authorize on your server.
+4. **CRITICAL:** In Discord *Server Settings -> Roles*, drag the **Epileptic** role **ABOVE** `Member` and `Not Verified`.
 
----
+### 2. VPS Deployment (Ubuntu Linux)
+On your VPS terminal, execute:
+```bash
+# 1. Clone repository
+git clone https://github.com/Makedonskiyy/epileptic-bot.git /opt/epileptic-bot
+cd /opt/epileptic-bot
 
-## ⚠️ CRITICAL: Role Hierarchy Setup
+# 2. Run automated installer
+chmod +x deploy/setup_vps.sh
+sudo ./deploy/setup_vps.sh
 
-For the bot to assign and remove roles:
-1. Open Discord: **Server Settings -> Roles**.
-2. Drag the **Epileptic** role **ABOVE** the `Member` and `Not Verified` roles (ideally right under `Administrator` or `Owner`).
-*(Discord forbids bots from managing roles placed higher than their own top role).*
+# 3. Add bot token
+sudo nano /opt/epileptic-bot/.env
+# Paste DISCORD_TOKEN=your_token, save with Ctrl+O, Enter, Ctrl+X
 
----
-
-## ⚙️ Configuration (.env)
-
-Edit the `.env` file in the project directory:
-```env
-# Discord Token
-DISCORD_TOKEN=your_real_bot_token_here
-
-# Optional: Guild ID for instant command sync
-GUILD_ID=
-
-# Server Role Names (matches your server)
-UNVERIFIED_ROLE_NAME=Not Verified
-MEMBER_ROLE_NAME=Member
-PREMIUM_ROLE_NAME=Premium Member
-AI_CONTRIBUTOR_ROLE_NAME=AI Contributor
-STAFF_ROLE_NAMES=Owner,Administrator,Moderator,admin,staff
-
-# Security Controls
-MIN_ACCOUNT_AGE_HOURS=24
-VERIFY_COOLDOWN_SECONDS=10
-ANTI_RAID_JOIN_THRESHOLD=10
-ANTI_RAID_WINDOW_SECONDS=15
-
-# Web Dashboard Login
-WEB_ENABLED=true
-WEB_HOST=0.0.0.0
-WEB_PORT=8080
-WEB_USERNAME=admin
-WEB_PASSWORD=epileptic_admin_2026
-WEB_SECRET=epileptic_secret_change_me_super_secure
+# 4. Restart service
+sudo systemctl restart epileptic.service
 ```
 
----
+### 3. Updating the Bot on VPS
+Whenever you push changes to GitHub:
+```bash
+cd /opt/epileptic-bot && git pull && sudo systemctl restart epileptic.service
+```
 
-## 💻 Local Launch (Windows / macOS)
-
-1. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-2. Start the bot:
-   ```bash
-   python bot.py
-   ```
-3. Access the dashboard:
-   Open `http://localhost:8080` and log in with your credentials (`admin` / `epileptic_admin_2026`).
-
----
-
-## 🚀 Ubuntu VPS 24/7 Deployment
-
-1. Transfer the project files to your VPS.
-2. Run the automated installer:
-   ```bash
-   chmod +x deploy/setup_vps.sh
-   sudo ./deploy/setup_vps.sh
-   ```
-3. Edit your token in `/opt/epileptic-bot/.env`:
-   ```bash
-   sudo nano /opt/epileptic-bot/.env
-   ```
-4. Restart the service:
-   ```bash
-   sudo systemctl restart epileptic.service
-   ```
-5. Check status & logs:
-   ```bash
-   sudo systemctl status epileptic.service
-   sudo journalctl -u epileptic.service -f
-   ```
-
----
-
-## 🛠️ Discord First-Time Setup
-
-1. Run `/setup_permissions` to lock and unlock categories appropriately.
-2. Run `/post_verification` in your rules channel (`📜・rules`).
-3. If you have existing unverified members, run `/assign_unverified_all`.
+### 4. Discord First-Time Walkthrough
+1. Run `/setup_permissions` in any channel (Owner only).
+2. Run `/post_verification` in `📜・rules`.
+3. Run `/post_ticket_panel` in `🎫・support-tickets`.
+4. Run `/assign_unverified_all` if you have existing members.
