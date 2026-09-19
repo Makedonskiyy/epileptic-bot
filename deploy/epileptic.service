@@ -1,0 +1,17 @@
+[Unit]
+Description=Epileptic Discord Bot & Web Dashboard Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/epileptic-bot
+ExecStart=/opt/epileptic-bot/venv/bin/python bot.py
+Restart=always
+RestartSec=10
+
+# Переменные среды
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

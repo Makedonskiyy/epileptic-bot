@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  epileptic-bot:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: epileptic_discord_bot
+    restart: always
+    env_file:
+      - ../.env
+    ports:
+      - "8080:8080"

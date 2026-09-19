@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Epileptic Bot — Community Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            500: '#8b5cf6',
+                            600: '#7c3aed',
+                            700: '#6d28d9',
+                        },
+                        darkbg: '#0c0e14',
+                        cardbg: '#181b24',
+                        bordercolor: '#262b3a'
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background-color: #0c0e14; color: #e2e8f0; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        .glass-card { background: rgba(22, 26, 36, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.07); }
+        .gradient-glow { background: radial-gradient(circle at 50% 0%, rgba(139, 92, 246, 0.22) 0%, transparent 60%); }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col relative overflow-x-hidden">
+    <div class="gradient-glow absolute inset-0 pointer-events-none h-96"></div>
+
+    <!-- Navigation Header -->
+    <header class="border-b border-bordercolor glass-card sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-brand-500/20">
+                    <i class="fa-solid fa-bolt text-white text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg text-white tracking-wide">EPILEPTIC BOT</h1>
+                    <p class="text-xs text-gray-400">Security & Community Control Center</p>
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-4">
+                <div class="flex items-center space-x-2 px-3 py-1.5 rounded-full glass-card border border-bordercolor">
+                    <span class="w-2.5 h-2.5 rounded-full {% if status.is_ready %}bg-emerald-400 animate-pulse{% else %}bg-amber-400{% endif %}"></span>
+                    <span class="text-xs font-medium text-gray-300">
+                        {% if status.is_ready %}Online ({{ status.latency_ms }} ms){% else %}Connecting...{% endif %}
+                    </span>
+                </div>
+                <div class="text-xs text-gray-400 hidden sm:block">
+                    Uptime: <span class="text-gray-200 font-mono">{{ status.uptime }}</span>
+                </div>
+                <a href="/logout" class="p-2 rounded-xl text-gray-400 hover:text-rose-400 hover:bg-rose-500/10 transition text-xs flex items-center space-x-1.5" title="Sign Out">
+                    <i class="fa-solid fa-arrow-right-from-bracket"></i>
+                    <span class="hidden md:inline">Logout</span>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 relative z-10">
+
+        <!-- Connected Server Banner -->
+        {% if guild %}
+        <div class="glass-card rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 border-l-4 border-brand-500">
+            <div class="flex items-center space-x-4">
+                {% if guild.icon %}
+                <img src="{{ guild.icon }}" alt="Icon" class="w-16 h-16 rounded-2xl border-2 border-brand-500/30 shadow-md">
+                {% else %}
+                <div class="w-16 h-16 rounded-2xl bg-gray-800 flex items-center justify-center text-2xl font-bold text-brand-500">
+                    {{ guild.name[:2] }}
+                </div>
+                {% endif %}
+                <div>
+                    <div class="flex items-center space-x-2">
+                        <h2 class="text-2xl font-bold text-white">{{ guild.name }}</h2>
+                        <span class="px-2 py-0.5 text-xs font-semibold rounded bg-brand-500/20 text-brand-400 border border-brand-500/30">Active</span>
+                    </div>
+                    <p class="text-sm text-gray-400 mt-0.5">Guild ID: <code class="text-xs bg-black/40 px-1.5 py-0.5 rounded">{{ guild.id }}</code> • Bot User: <span class="text-gray-300 font-medium">{{ status.bot_user }}</span></p>
+                </div>
+            </div>
+
+            <!-- Security Badge -->
+            <div class="flex items-center space-x-3 bg-emerald-500/10 border border-emerald-500/30 px-4 py-2.5 rounded-xl text-emerald-400 text-xs">
+                <i class="fa-solid fa-shield-check text-lg"></i>
+                <div>
+                    <p class="font-bold">Anti-Abuse Active</p>
+                    <p class="text-[11px] text-emerald-300/70">Anti-Raid, Cooldowns & Age Guard</p>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="glass-card rounded-2xl p-6 border-l-4 border-amber-500 text-amber-300">
+            <div class="flex items-center space-x-3">
+                <i class="fa-solid fa-triangle-exclamation text-2xl"></i>
+                <div>
+                    <h3 class="font-bold">Bot is awaiting Discord Gateway connection</h3>
+                    <p class="text-xs text-amber-200/80">Make sure your bot token is set in .env and the bot is invited to the server.</p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Member Metric Counters -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            <!-- Total Members -->
+            <div class="glass-card rounded-xl p-5 relative overflow-hidden">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Total Members</p>
+                        <h3 class="text-3xl font-extrabold text-white mt-1">{{ guild.total_members if guild else '—' }}</h3>
+                    </div>
+                    <div class="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 text-xl">
+                        <i class="fa-solid fa-users"></i>
+                    </div>
+                </div>
+                <div class="mt-3 text-xs text-gray-400">
+                    <span class="text-blue-400 font-semibold">{{ guild.channels_count if guild else 0 }}</span> channels across <span class="text-blue-400 font-semibold">{{ guild.roles_count if guild else 0 }}</span> roles
+                </div>
+            </div>
+
+            <!-- Unverified Members -->
+            <div class="glass-card rounded-xl p-5 relative overflow-hidden">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Not Verified</p>
+                        <h3 class="text-3xl font-extrabold text-amber-400 mt-1">{{ guild.unverified_count if guild else '—' }}</h3>
+                    </div>
+                    <div class="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 text-xl">
+                        <i class="fa-solid fa-user-clock"></i>
+                    </div>
+                </div>
+                <div class="mt-3 text-xs text-gray-400">
+                    Role: <code class="ml-1 text-amber-300 font-mono text-[11px]">@{{ config.unverified_role }}</code>
+                </div>
+            </div>
+
+            <!-- Verified Members -->
+            <div class="glass-card rounded-xl p-5 relative overflow-hidden">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Community Members</p>
+                        <h3 class="text-3xl font-extrabold text-emerald-400 mt-1">{{ guild.member_count if guild else '—' }}</h3>
+                    </div>
+                    <div class="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 text-xl">
+                        <i class="fa-solid fa-user-check"></i>
+                    </div>
+                </div>
+                <div class="mt-3 text-xs text-gray-400">
+                    Role: <code class="ml-1 text-emerald-300 font-mono text-[11px]">@{{ config.member_role }}</code>
+                </div>
+            </div>
+
+            <!-- Premium Members -->
+            <div class="glass-card rounded-xl p-5 relative overflow-hidden">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Premium Members</p>
+                        <h3 class="text-3xl font-extrabold text-fuchsia-400 mt-1">{{ guild.premium_count if guild else '—' }}</h3>
+                    </div>
+                    <div class="w-12 h-12 rounded-xl bg-fuchsia-500/10 border border-fuchsia-500/20 flex items-center justify-center text-fuchsia-400 text-xl">
+                        <i class="fa-solid fa-gem"></i>
+                    </div>
+                </div>
+                <div class="mt-3 text-xs text-gray-400">
+                    Role: <code class="ml-1 text-fuchsia-300 font-mono text-[11px]">@{{ config.premium_role }}</code>
+                </div>
+            </div>
+        </div>
+
+        <!-- Actions & Security Controls -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Publish Verification Button Panel -->
+            <div class="glass-card rounded-2xl p-6 flex flex-col justify-between space-y-4">
+                <div>
+                    <div class="flex items-center space-x-2 text-white font-bold text-lg mb-1">
+                        <i class="fa-solid fa-paper-plane text-brand-500"></i>
+                        <span>Publish Verification Embed</span>
+                    </div>
+                    <p class="text-sm text-gray-400">
+                        Dispatch the official community rules embed with the persistent <strong class="text-emerald-400">«Accept Rules & Get Access»</strong> button directly to your rules channel (e.g. <code class="text-gray-300">rules</code>).
+                    </p>
+                </div>
+
+                <form id="verifyForm" class="space-y-4 pt-2">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-300 mb-1.5 uppercase tracking-wider">Target Channel Name:</label>
+                        <input type="text" id="channelNameInput" name="channel_name" value="rules" placeholder="rules or announcements" class="w-full px-4 py-2.5 rounded-xl bg-black/40 border border-bordercolor text-white text-sm focus:outline-none focus:border-brand-500">
+                    </div>
+                    <button type="button" onclick="submitVerifyMessage()" class="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white font-semibold text-sm transition-all shadow-lg shadow-brand-600/20 flex items-center justify-center space-x-2">
+                        <i class="fa-solid fa-check"></i>
+                        <span>Post to Channel</span>
+                    </button>
+                    <div id="verifyAlert" class="hidden p-3 rounded-lg text-xs"></div>
+                </form>
+            </div>
+
+            <!-- Security & Anti-Abuse Status -->
+            <div class="glass-card rounded-2xl p-6 space-y-4">
+                <div class="flex items-center space-x-2 text-white font-bold text-lg">
+                    <i class="fa-solid fa-lock text-indigo-400"></i>
+                    <span>Anti-Abuse & Guard Status</span>
+                </div>
+                <div class="space-y-2.5 text-xs">
+                    <div class="p-3 rounded-xl bg-black/30 border border-bordercolor flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <i class="fa-solid fa-stopwatch text-brand-400 text-base"></i>
+                            <div>
+                                <p class="font-bold text-white">Interaction Rate Limiting</p>
+                                <p class="text-gray-400 text-[11px]">Prevents button spam & gateway flood</p>
+                            </div>
+                        </div>
+                        <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono font-bold">{{ config.cooldown_sec }}s per user</span>
+                    </div>
+
+                    <div class="p-3 rounded-xl bg-black/30 border border-bordercolor flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <i class="fa-solid fa-user-shield text-amber-400 text-base"></i>
+                            <div>
+                                <p class="font-bold text-white">Account Age Filter</p>
+                                <p class="text-gray-400 text-[11px]">Blocks throwaway raid bots from instant verify</p>
+                            </div>
+                        </div>
+                        <span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 font-mono font-bold">{{ config.min_account_age }}h minimum</span>
+                    </div>
+
+                    <div class="p-3 rounded-xl bg-black/30 border border-bordercolor flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <i class="fa-solid fa-shield-virus text-emerald-400 text-base"></i>
+                            <div>
+                                <p class="font-bold text-white">Join Flood & Anti-Raid Guard</p>
+                                <p class="text-gray-400 text-[11px]">Alerts staff in <code>📊・mod-logs</code> upon mass joins</p>
+                            </div>
+                        </div>
+                        <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono font-bold">Armed</span>
+                    </div>
+
+                    <div class="p-3 rounded-xl bg-black/30 border border-bordercolor flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <i class="fa-solid fa-key text-fuchsia-400 text-base"></i>
+                            <div>
+                                <p class="font-bold text-white">Slash Command Staff Guard</p>
+                                <p class="text-gray-400 text-[11px]">Enforces role checks on bot side (Owner, Admin, Moderator)</p>
+                            </div>
+                        </div>
+                        <span class="px-2 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-400 font-mono font-bold">Enforced</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-bordercolor py-4 text-center text-xs text-gray-500">
+        Epileptic Discord Bot • Security Reinforced • Powered by Python & discord.py
+    </footer>
+
+    <script>
+        async function submitVerifyMessage() {
+            const channelInput = document.getElementById('channelNameInput');
+            const alertBox = document.getElementById('verifyAlert');
+            const channel = channelInput.value.trim();
+
+            alertBox.className = "p-3 rounded-lg text-xs bg-gray-800 text-gray-200";
+            alertBox.innerText = "Dispatching request to bot...";
+            alertBox.classList.remove('hidden');
+
+            try {
+                const formData = new FormData();
+                formData.append('channel_name', channel);
+
+                const response = await fetch('/api/action/post_verify', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    alertBox.className = "p-3 rounded-lg text-xs bg-emerald-950/60 border border-emerald-500/30 text-emerald-300";
+                    alertBox.innerText = result.message;
+                } else {
+                    alertBox.className = "p-3 rounded-lg text-xs bg-rose-950/60 border border-rose-500/30 text-rose-300";
+                    alertBox.innerText = "Error: " + (result.error || "Unknown error");
+                }
+            } catch (err) {
+                alertBox.className = "p-3 rounded-lg text-xs bg-rose-950/60 border border-rose-500/30 text-rose-300";
+                alertBox.innerText = "Connection error: " + err.message;
+            }
+        }
+    </script>
+</body>
+</html>
