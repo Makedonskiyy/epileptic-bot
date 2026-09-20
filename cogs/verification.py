@@ -1,3 +1,4 @@
+import time
 import logging
 import discord
 from discord import app_commands
@@ -7,6 +8,9 @@ from cogs.security import security_manager, send_mod_log, is_staff
 from cogs.welcome_card import create_welcome_card, get_ordinal
 
 logger = logging.getLogger("epileptic.verification")
+
+# Deduplication cache to prevent duplicate welcomes for the same member (member_id -> timestamp)
+_recently_welcomed: dict[int, float] = {}
 
 
 def find_role_by_key(guild: discord.Guild, key: str, configured_name: str) -> discord.Role | None:
@@ -210,6 +214,19 @@ class VerificationCog(commands.Cog, name="Verification"):
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         """Automatically assigns Not Verified role and posts welcome message."""
+        now = time.time()
+        last_welcome = _recently_welcomed.get(member.id, 0.0)
+        if (now - last_welcome) < 60.0:
+            logger.info(f"Skipping duplicate welcome event for {member} ({member.id}) - welcomed {now - last_welcome:.1f}s ago.")
+            return
+        _recently_welcomed[member.id] = now
+
+        # Prune old cache entries if cache grows large
+        if len(_recently_welcomed) > 500:
+            cutoff = now - 300.0
+            for uid in [k for k, v in _recently_welcomed.items() if v < cutoff]:
+                _recently_welcomed.pop(uid, None)
+
         guild = member.guild
         unverified_role = find_role_by_key(guild, "unverified", config.UNVERIFIED_ROLE_NAME)
 
@@ -241,21 +258,48 @@ class VerificationCog(commands.Cog, name="Verification"):
                 except Exception as av_err:
                     logger.warning(f"Could not fetch avatar for {member}: {av_err}")
 
+                # Retrieve the most accurate live count available
+                count = guild.member_count or len(guild.members) or 1
+                try:
+                    fresh_guild = await self.bot.fetch_guild(guild.id, with_counts=True)
+                    if fresh_guild and fresh_guild.approximate_member_count:
+                        count = fresh_guild.approximate_member_count
+                except Exception as cnt_err:
+                    logger.debug(f"Could not fetch fresh approximate count: {cnt_err}")
+
                 card_buffer = create_welcome_card(
                     avatar_bytes=avatar_bytes,
                     username=member.display_name,
-                    member_count=guild.member_count,
+                    member_count=count,
                     server_name=guild.name
                 )
 
-                ordinal_str = get_ordinal(guild.member_count)
+                ordinal_str = get_ordinal(count)
                 content_text = f"Welcome {member.mention} to **{guild.name}**! You are the {ordinal_str} member!"
                 welcome_file = discord.File(fp=card_buffer, filename="welcome.png")
 
                 await welcome_channel.send(content=content_text, file=welcome_file)
-                logger.info(f"Sent visual welcome card for {member} in #{welcome_channel.name}.")
+                logger.info(f"Sent visual welcome card for {member} in #{welcome_channel.name} (count: {count}).")
             except Exception as e:
                 logger.warning(f"Failed to post welcome card in {welcome_channel.name}: {e}")
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        """Logs member departures to mod-logs so staff can track live population changes."""
+        guild = member.guild
+        current_count = guild.member_count or len(guild.members)
+        logger.info(f"Member left {guild.name}: {member} ({member.id}). Current count: {current_count}")
+
+        embed = discord.Embed(
+            title="👋 [AUDIT] Member Left Server",
+            description=(
+                f"**User:** {member.mention} (`{member.display_name}`, ID: `{member.id}`)\n"
+                f"**Current Server Members:** `{current_count}`"
+            ),
+            color=config.EMBED_COLOR_WARNING
+        )
+        embed.set_thumbnail(url=member.display_avatar.url)
+        await send_mod_log(guild, embed)
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
