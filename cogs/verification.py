@@ -107,6 +107,47 @@ async def execute_verification(guild: discord.Guild, member: discord.Member) -> 
         return False, f"An unexpected error occurred: `{e}`"
 
 
+def build_premium_pitch_dm(guild: discord.Guild, member: discord.Member) -> discord.Embed:
+    """Builds an authentic, casual US youth slang welcome & premium pitch DM embed."""
+    access_channel = discord.utils.find(
+        lambda c: any(kw in c.name.lower() for kw in ["get-access", "access", "premium", "платн"]),
+        guild.text_channels
+    )
+    support_channel = discord.utils.find(
+        lambda c: any(kw in c.name.lower() for kw in ["ticket", "support", "помощь"]),
+        guild.text_channels
+    )
+
+    access_mention = access_channel.mention if access_channel else "⚡・get-access"
+    support_mention = support_channel.mention if support_channel else "🎫・support-tickets"
+
+    description = (
+        f"Yo **{member.display_name}**, glad to have you on the server! 🙌\n\n"
+        f"🔥 **Wanna get the absolute most out of the server?**\n"
+        f"Our **Premium Member** pass is live, hooking you up with the real good stuff:\n\n"
+        f"• 🔓 **Secret & unpatched jailbreaks** (DeepSeek, Gemini, Muse Spark)\n"
+        f"• 🛠️ **Exclusive pro prompts & custom AI tools**\n"
+        f"• 💬 **Priority 1-on-1 help & private VIP chats**\n"
+        f"• 🔄 **Daily drops & fresh database updates**\n\n"
+        f"👉 **How to cop access:**\n"
+        f"Slide over to {access_mention} or open a quick ticket in {support_mention} to get hooked up!\n\n"
+        f"Enjoy your stay and go crazy in the chats! ⚡"
+    )
+
+    embed = discord.Embed(
+        title="💎 Welcome to Epileptic Community!",
+        description=description,
+        color=config.RULES_EMBED_COLOR
+    )
+    if guild.icon:
+        embed.set_thumbnail(url=guild.icon.url)
+    embed.set_footer(
+        text="Epileptic Community • Level Up Your AI Game",
+        icon_url=guild.me.display_avatar.url if guild.me else None
+    )
+    return embed
+
+
 class PersistentVerificationView(discord.ui.View):
     """Persistent Discord UI Button View."""
     def __init__(self):
@@ -131,6 +172,13 @@ class PersistentVerificationView(discord.ui.View):
         success, message = await execute_verification(guild, member)
 
         if success and "already verified" not in message.lower():
+            # Send the casual US youth slang Premium pitch DM
+            try:
+                dm_embed = build_premium_pitch_dm(guild, member)
+                await member.send(embed=dm_embed)
+            except Exception:
+                pass
+
             embed = discord.Embed(
                 title="🎉 Welcome to the Community!",
                 description=(
@@ -249,14 +297,41 @@ class VerificationCog(commands.Cog, name="Verification"):
             return
 
         success, message = await execute_verification(guild, member)
-        if success:
+        if success and "already verified" not in message.lower():
+            # Send the casual US youth slang Premium pitch DM
             try:
-                await member.send(
-                    f"✅ **You have been verified on {guild.name}!**\n"
-                    f"All community channels are now unlocked for you. Welcome aboard!"
-                )
-            except Exception:
-                pass
+                dm_embed = build_premium_pitch_dm(guild, member)
+                await member.send(embed=dm_embed)
+                logger.info(f"Sent Premium pitch DM to newly verified member {member} ({member.id}).")
+            except discord.Forbidden:
+                logger.info(f"Could not send welcome DM to {member} (DMs closed by user).")
+            except Exception as e:
+                logger.warning(f"Failed to send welcome DM to {member}: {e}")
+
+    @app_commands.command(
+        name="test_welcome_dm",
+        description="Send a test copy of the Premium Welcome DM directly to your private messages."
+    )
+    @is_staff()
+    async def test_welcome_dm(self, interaction: discord.Interaction):
+        """Allows staff to preview and test the Premium pitch DM in their own messages."""
+        dm_embed = build_premium_pitch_dm(interaction.guild, interaction.user)
+        try:
+            await interaction.user.send(embed=dm_embed)
+            await interaction.response.send_message(
+                "✅ Test welcome DM successfully sent! Check your private messages.",
+                ephemeral=True
+            )
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "❌ Could not send DM! Please enable direct messages in *User Settings -> Privacy & Safety*.",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                f"❌ Error sending test DM: `{e}`",
+                ephemeral=True
+            )
 
     @app_commands.command(
         name="post_verification",
