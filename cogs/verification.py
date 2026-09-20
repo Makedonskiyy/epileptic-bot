@@ -123,15 +123,15 @@ def build_premium_pitch_dm(guild: discord.Guild, member: discord.Member) -> disc
     support_mention = support_channel.mention if support_channel else "🎫・support-tickets"
 
     description = (
-        f"Yo **{member.display_name}**, glad to have you on the server! 🙌\n\n"
-        f"🔥 **Wanna get the absolute most out of the server?**\n"
+        f"Yo **{member.display_name}**, glad to have you on the server.\n\n"
+        f"**Wanna get the absolute most out of the server?**\n"
         f"Our **Premium Member** pass is live, hooking you up with the real good stuff:\n\n"
-        f"• 🔓 **Secret & unpatched jailbreaks** (DeepSeek, Gemini, Muse Spark)\n"
-        f"• 🛠️ **Exclusive pro prompts & custom AI tools**\n"
-        f"• 💬 **Priority 1-on-1 help & private VIP chats**\n"
-        f"• 🔄 **Daily drops & fresh database updates**\n\n"
-        f"👉 **How to cop access:**\n"
-        f"Slide over to {access_mention} or open a quick ticket in {support_mention} to get hooked up!\n\n"
+        f"• **Secret & unpatched jailbreaks** (DeepSeek, Gemini, Muse Spark)\n"
+        f"• **Exclusive pro prompts & custom AI tools**\n"
+        f"• **Priority 1-on-1 help & private VIP chats**\n"
+        f"• **Daily drops & fresh database updates**\n\n"
+        f"**How to cop access:**\n"
+        f"Slide over to {access_mention} or open a quick ticket in {support_mention} to get hooked up.\n\n"
         f"Enjoy your stay and go crazy in the chats! ⚡"
     )
 
