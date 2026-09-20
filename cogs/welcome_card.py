@@ -37,6 +37,36 @@ def load_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
         return ImageFont.load_default()
 
 
+def fit_text_to_width(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    max_width: int,
+    initial_size: int,
+    min_size: int = 14,
+    bold: bool = True
+) -> tuple[str, ImageFont.ImageFont]:
+    """Dynamically scales down font size and truncates if necessary to fit within max_width."""
+    size = initial_size
+    font = load_font(size, bold=bold)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    width = bbox[2] - bbox[0]
+
+    while width > max_width and size > min_size:
+        size -= 1
+        font = load_font(size, bold=bold)
+        bbox = draw.textbbox((0, 0), text, font=font)
+        width = bbox[2] - bbox[0]
+
+    # If still too long at minimum font size, truncate cleanly with ellipsis
+    if width > max_width:
+        while len(text) > 4 and width > max_width:
+            text = text[:-4] + "..."
+            bbox = draw.textbbox((0, 0), text, font=font)
+            width = bbox[2] - bbox[0]
+
+    return text, font
+
+
 def create_welcome_card(
     avatar_bytes: bytes | None,
     username: str,
@@ -45,11 +75,11 @@ def create_welcome_card(
 ) -> io.BytesIO:
     """
     Generates a sleek, high-resolution welcome card image (matching Welcomer style).
-    - Dark rectangular canvas with clean rounded frame
+    - Guaranteed zero text overflow via dynamic font auto-fitting
     - High-quality circular avatar with smooth antialiased mask
-    - Styled dynamic welcome text with ordinal member count
+    - Perfectly centered typography with clean borders
     """
-    W, H = 840, 260
+    W, H = 900, 270
 
     # 1. Base dark canvas (#0E0F14)
     img = Image.new("RGBA", (W, H), (14, 15, 20, 255))
@@ -64,8 +94,8 @@ def create_welcome_card(
     )
 
     # 3. Avatar dimensions & placement
-    av_size = 140
-    av_x = 55
+    av_size = 150
+    av_x = 50
     av_y = (H - av_size) // 2
 
     if avatar_bytes:
@@ -93,22 +123,33 @@ def create_welcome_card(
     # Avatar white border ring
     draw.ellipse([(av_x, av_y), (av_x + av_size, av_y + av_size)], outline=(255, 255, 255, 255), width=4)
 
-    # 4. Text Layout & Typography
-    text_x = av_x + av_size + 40
-    font_large = load_font(34, bold=True)
-    font_sub = load_font(23, bold=True)
+    # 4. Text Layout & Auto-Fitting
+    text_x = av_x + av_size + 35
+    max_text_width = (W - 45) - text_x
 
-    # Truncate overly long usernames
-    display_user = username if len(username) <= 22 else username[:19] + "..."
     ordinal_str = get_ordinal(member_count)
-
     clean_server = server_name.upper()
-    line1 = f"Welcome {display_user}"
-    line2 = f"to {clean_server} you are the {ordinal_str} member!"
 
-    # Draw Text
-    draw.text((text_x, 90), line1, fill=(255, 255, 255, 255), font=font_large)
-    draw.text((text_x, 142), line2, fill=(240, 240, 245, 235), font=font_sub)
+    raw_line1 = f"Welcome {username}"
+    raw_line2 = f"to {clean_server} you are the {ordinal_str} member!"
+
+    # Dynamically fit both lines so they never touch or cross the frame border
+    line1_text, font_line1 = fit_text_to_width(draw, raw_line1, max_text_width, initial_size=36, min_size=16, bold=True)
+    line2_text, font_line2 = fit_text_to_width(draw, raw_line2, max_text_width, initial_size=23, min_size=13, bold=True)
+
+    # Measure exact rendered heights to center vertically relative to the card
+    bbox1 = draw.textbbox((0, 0), line1_text, font=font_line1)
+    bbox2 = draw.textbbox((0, 0), line2_text, font=font_line2)
+    h1 = bbox1[3] - bbox1[1]
+    h2 = bbox2[3] - bbox2[1]
+    line_gap = 14
+    total_text_h = h1 + line_gap + h2
+
+    start_y = (H - total_text_h) // 2
+
+    # Draw Text safely inside the card
+    draw.text((text_x, start_y), line1_text, fill=(255, 255, 255, 255), font=font_line1)
+    draw.text((text_x, start_y + h1 + line_gap), line2_text, fill=(240, 240, 245, 235), font=font_line2)
 
     # Export to memory buffer
     buffer = io.BytesIO()
