@@ -4,6 +4,7 @@ from discord import app_commands
 from discord.ext import commands
 import config
 from cogs.security import security_manager, send_mod_log, is_staff
+from cogs.welcome_card import create_welcome_card, get_ordinal
 
 logger = logging.getLogger("epileptic.verification")
 
@@ -225,49 +226,36 @@ class VerificationCog(commands.Cog, name="Verification"):
             except Exception as e:
                 logger.exception(f"Error assigning unverified role to {member}: {e}")
 
-        # 2. Post welcome message to welcome channel
+        # 2. Post visual welcome banner card to welcome channel
         welcome_channel = discord.utils.find(
             lambda c: any(kw in c.name.lower() for kw in ["welcome", "приветств"]),
             guild.text_channels
         )
-        rules_channel = discord.utils.find(
-            lambda c: any(kw in c.name.lower() for kw in ["rules", "правил"]),
-            guild.text_channels
-        )
-        access_channel = discord.utils.find(
-            lambda c: any(kw in c.name.lower() for kw in ["get-access", "access", "premium", "платн"]),
-            guild.text_channels
-        )
-
-        rules_mention = rules_channel.mention if rules_channel else "📜・rules"
-        access_mention = access_channel.mention if access_channel else "⚡・get-access"
 
         if welcome_channel:
             try:
-                welcome_text = (
-                    f"Hey {member.mention}, welcome to **Epileptic Community**! 👋\n\n"
-                    f"Glad to have you here! Before diving in, take a second to look around:\n\n"
-                    f"📜 Make sure to check out {rules_mention} to keep things chill.\n"
-                    f"🧭 Feel free to explore the server, we have tons of useful resources, tools, and info waiting for you.\n"
-                    f"💬 Drop by the general chats to vibe and connect with like-minded people!\n\n"
-                    f"💎 **Looking for exclusive stuff?**\n"
-                    f"Grab premium access right here ➔ {access_mention}\n\n"
-                    f"Enjoy your stay!"
+                # Read member avatar bytes
+                avatar_bytes = None
+                try:
+                    avatar_bytes = await member.display_avatar.with_format("png").with_size(256).read()
+                except Exception as av_err:
+                    logger.warning(f"Could not fetch avatar for {member}: {av_err}")
+
+                card_buffer = create_welcome_card(
+                    avatar_bytes=avatar_bytes,
+                    username=member.display_name,
+                    member_count=guild.member_count,
+                    server_name=guild.name
                 )
 
-                embed = discord.Embed(
-                    description=welcome_text,
-                    color=config.RULES_EMBED_COLOR
-                )
-                embed.set_thumbnail(url=member.display_avatar.url)
-                embed.set_footer(
-                    text=f"Member #{guild.member_count}",
-                    icon_url=guild.icon.url if guild.icon else None
-                )
+                ordinal_str = get_ordinal(guild.member_count)
+                content_text = f"Welcome {member.mention} to **{guild.name}**! You are the {ordinal_str} member!"
+                welcome_file = discord.File(fp=card_buffer, filename="welcome.png")
 
-                await welcome_channel.send(embed=embed)
+                await welcome_channel.send(content=content_text, file=welcome_file)
+                logger.info(f"Sent visual welcome card for {member} in #{welcome_channel.name}.")
             except Exception as e:
-                logger.warning(f"Failed to post welcome message in {welcome_channel.name}: {e}")
+                logger.warning(f"Failed to post welcome card in {welcome_channel.name}: {e}")
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
@@ -332,6 +320,55 @@ class VerificationCog(commands.Cog, name="Verification"):
                 f"❌ Error sending test DM: `{e}`",
                 ephemeral=True
             )
+
+    @app_commands.command(
+        name="test_welcome_card",
+        description="Preview and test the dynamic visual welcome card in the channel."
+    )
+    @app_commands.describe(
+        target_channel="Channel to post test card in (optional, defaults to current channel)",
+        member="Member to preview on the card (optional, defaults to yourself)"
+    )
+    @is_staff()
+    async def test_welcome_card(
+        self,
+        interaction: discord.Interaction,
+        target_channel: discord.TextChannel = None,
+        member: discord.Member = None
+    ):
+        """Allows staff to preview and test the Welcomer visual banner card."""
+        target_user = member or interaction.user
+        channel = target_channel or interaction.channel
+        guild = interaction.guild
+
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            avatar_bytes = None
+            try:
+                avatar_bytes = await target_user.display_avatar.with_format("png").with_size(256).read()
+            except Exception as av_err:
+                logger.warning(f"Could not fetch avatar for test card: {av_err}")
+
+            card_buffer = create_welcome_card(
+                avatar_bytes=avatar_bytes,
+                username=target_user.display_name,
+                member_count=guild.member_count,
+                server_name=guild.name
+            )
+
+            ordinal_str = get_ordinal(guild.member_count)
+            content_text = f"Welcome {target_user.mention} to **{guild.name}**! You are the {ordinal_str} member!"
+            welcome_file = discord.File(fp=card_buffer, filename="welcome_card.png")
+
+            msg = await channel.send(content=content_text, file=welcome_file)
+            await interaction.followup.send(
+                f"✅ Visual welcome card successfully sent to {channel.mention}! [View Message]({msg.jump_url})",
+                ephemeral=True
+            )
+        except Exception as e:
+            logger.exception(f"Failed to generate test welcome card: {e}")
+            await interaction.followup.send(f"❌ Failed to create card: `{e}`", ephemeral=True)
 
     @app_commands.command(
         name="post_verification",
