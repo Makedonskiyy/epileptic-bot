@@ -83,20 +83,10 @@ async def execute_verification(
         return False, f"⏳ **Slow down:** Please wait `{remaining}s` before trying again."
 
     # 2. Minimum Account Age Check (Anti-Bot / Anti-Raid)
-    if not ignore_account_age:
+    if not ignore_account_age and config.MIN_ACCOUNT_AGE_HOURS > 0:
         age_ok, age_err = security_manager.check_account_age(member)
         if not age_ok:
-            audit_embed = discord.Embed(
-                title="🛡️ [SECURITY] Verification Blocked (New Account)",
-                description=(
-                    f"**User:** {member.mention} (`{member.id}`)\n"
-                    f"**Created:** <t:{int(member.created_at.timestamp())}:R>\n"
-                    f"**Threshold:** Minimum {config.MIN_ACCOUNT_AGE_HOURS} hours required.\n"
-                    f"💡 *To allow all accounts to verify immediately, run `/set_min_account_age hours:0`.*"
-                ),
-                color=config.EMBED_COLOR_WARNING
-            )
-            await send_mod_log(guild, audit_embed)
+            logger.info(f"Verification blocked for {member} ({member.id}) due to account age threshold.")
             return False, age_err
 
     # 3. Role Discovery
@@ -146,19 +136,6 @@ async def execute_verification(
 
         await member.add_roles(member_role, reason="Verification: accepted community rules")
         logger.info(f"User {member} ({member.id}) verified successfully.")
-
-        # 6. Audit Log to mod-logs
-        log_embed = discord.Embed(
-            title="✅ [AUDIT] Member Verified",
-            description=(
-                f"**User:** {member.mention} (`{member.id}`)\n"
-                f"**Account Age:** <t:{int(member.created_at.timestamp())}:R>\n"
-                f"**Role Assigned:** @{member_role.name}"
-            ),
-            color=config.EMBED_COLOR_SUCCESS
-        )
-        log_embed.set_thumbnail(url=member.display_avatar.url)
-        await send_mod_log(guild, log_embed)
 
         return True, f"✅ Verification successful! Granted role **@{member_role.name}**."
     except discord.Forbidden:
