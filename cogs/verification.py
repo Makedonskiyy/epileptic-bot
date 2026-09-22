@@ -285,21 +285,10 @@ class VerificationCog(commands.Cog, name="Verification"):
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
-        """Logs member departures to mod-logs so staff can track live population changes."""
+        """Internal logging of member departures (batched daily/weekly summaries handle chat reporting)."""
         guild = member.guild
         current_count = guild.member_count or len(guild.members)
         logger.info(f"Member left {guild.name}: {member} ({member.id}). Current count: {current_count}")
-
-        embed = discord.Embed(
-            title="👋 [AUDIT] Member Left Server",
-            description=(
-                f"**User:** {member.mention} (`{member.display_name}`, ID: `{member.id}`)\n"
-                f"**Current Server Members:** `{current_count}`"
-            ),
-            color=config.EMBED_COLOR_WARNING
-        )
-        embed.set_thumbnail(url=member.display_avatar.url)
-        await send_mod_log(guild, embed)
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):

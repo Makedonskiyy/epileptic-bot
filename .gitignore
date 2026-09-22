@@ -25,3 +25,8 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Databases & local state
+data/
+*.db
+*.sqlite3

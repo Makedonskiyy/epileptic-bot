@@ -329,6 +329,144 @@ class SetupServerCog(commands.Cog, name="Server Setup"):
         embed.add_field(name="Already Verified / Staff", value=f"**{skipped_count}** members", inline=True)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
+    @app_commands.command(
+        name="setup_community_channels",
+        description="Configures official Rules [✓📖] and Announcement [📢] channels (requires Community feature)."
+    )
+    @app_commands.describe(
+        rules_channel="Channel to designate as official Rules channel (defaults to #rules)",
+        announcements_channel="Channel to convert to Announcement/News channel with Follow button (defaults to #announcements)",
+        match_screenshot_style="Rename channels with ▸ styling matching screenshot (e.g. 📜▸rules, 📢▸announcements)"
+    )
+    @is_owner()
+    async def setup_community_channels(
+        self,
+        interaction: discord.Interaction,
+        rules_channel: discord.TextChannel = None,
+        announcements_channel: discord.TextChannel = None,
+        match_screenshot_style: bool = True
+    ):
+        """Sets up the official Rules channel (with the book-checkmark badge) and News channel (with Follow button)."""
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+
+        # Check if Discord Community is enabled on this server
+        has_community = "COMMUNITY" in guild.features
+
+        if not has_community:
+            guide_embed = discord.Embed(
+                title="⚠️ Discord Community Not Enabled Yet",
+                description=(
+                    "The **[✓📖] Rules badge** and **[📢] Announcement channel (with 'Follow' button)** "
+                    "are exclusive features of **Discord Community** servers.\n\n"
+                    "**How to enable it in 30 seconds:**\n"
+                    "1. In Discord, open **Server Settings** (Настройки сервера).\n"
+                    "2. Scroll down in the left menu and click **Enable Community** (Включить сообщество).\n"
+                    "3. Click **Get Started** (Начать), leave default security checks, and click **Next**.\n"
+                    "4. In *Rules or guidelines channel*, select your rules channel.\n"
+                    "5. In *Community updates channel*, select your announcements channel.\n"
+                    "6. Click **Finish Setup**.\n\n"
+                    "💡 *After enabling Community, run this command (`/setup_community_channels`) again, and the bot will finish configuring everything!*"
+                ),
+                color=config.EMBED_COLOR_WARNING
+            )
+            await interaction.followup.send(embed=guide_embed, ephemeral=True)
+            return
+
+        # 1. Resolve Rules Channel
+        r_ch = rules_channel or discord.utils.find(
+            lambda c: any(kw in c.name.lower() for kw in ["rules", "правил"]),
+            guild.text_channels
+        )
+
+        # 2. Resolve Announcements Channel
+        a_ch = announcements_channel or discord.utils.find(
+            lambda c: any(kw in c.name.lower() for kw in ["announcement", "объявлен"]),
+            guild.text_channels
+        )
+
+        actions_taken = []
+
+        # Configure Rules Channel
+        if r_ch:
+            try:
+                new_name = "📜▸rules" if match_screenshot_style else r_ch.name
+                await guild.edit(rules_channel=r_ch)
+                if match_screenshot_style and r_ch.name != new_name:
+                    await r_ch.edit(name=new_name)
+                actions_taken.append(f"✅ **Rules Channel:** Set {r_ch.mention} as official Rules channel (granted **[✓📖]** badge)!")
+            except Exception as e:
+                actions_taken.append(f"❌ Failed to set rules channel: `{e}`")
+        else:
+            actions_taken.append("⚠️ Rules channel not found (specify manually in command argument).")
+
+        # Configure Announcement Channel
+        if a_ch:
+            try:
+                new_name = "📢▸announcements" if match_screenshot_style else a_ch.name
+                # Convert to news channel type
+                if a_ch.type != discord.ChannelType.news:
+                    await a_ch.edit(type=discord.ChannelType.news)
+                if match_screenshot_style and a_ch.name != new_name:
+                    await a_ch.edit(name=new_name)
+                actions_taken.append(f"✅ **Announcement Channel:** Converted {a_ch.mention} to **News/Announcement channel** (granted **[📢]** icon and **'Follow'** button)!")
+            except Exception as e:
+                actions_taken.append(f"❌ Failed to convert announcement channel: `{e}`")
+        else:
+            actions_taken.append("⚠️ Announcements channel not found (specify manually in command argument).")
+
+        embed = discord.Embed(
+            title="✨ Community Channels Configured",
+            description="\n\n".join(actions_taken),
+            color=config.EMBED_COLOR_SUCCESS
+        )
+        embed.set_footer(text="Epileptic Server Guard")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @app_commands.command(
+        name="convert_to_announcement",
+        description="Convert any text channel into an Announcement channel with a Follow button (requires Community)."
+    )
+    @app_commands.describe(
+        channel="Target text channel to convert into Announcement/News channel"
+    )
+    @is_owner()
+    async def convert_to_announcement(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        """Converts a standard text channel into a News channel."""
+        if "COMMUNITY" not in interaction.guild.features:
+            await interaction.response.send_message(
+                "❌ This server does not have **Discord Community** enabled yet. Enable it in Server Settings first.",
+                ephemeral=True
+            )
+            return
+
+        try:
+            await channel.edit(type=discord.ChannelType.news)
+            await interaction.response.send_message(
+                f"✅ Channel {channel.mention} is now an **Announcement Channel**! Users can now follow it to receive updates.",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                f"❌ Failed to convert channel: `{e}`",
+                ephemeral=True
+            )
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        """Automatically crossposts/publishes staff announcements sent in News channels."""
+        if not message.guild or message.author.bot:
+            return
+
+        if message.channel.type == discord.ChannelType.news:
+            try:
+                await message.publish()
+                logger.info(f"Auto-published announcement message {message.id} in #{message.channel.name}.")
+            except discord.Forbidden:
+                logger.debug(f"Missing permissions to publish message in #{message.channel.name}.")
+            except Exception as e:
+                logger.warning(f"Could not auto-publish announcement: {e}")
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(SetupServerCog(bot))
