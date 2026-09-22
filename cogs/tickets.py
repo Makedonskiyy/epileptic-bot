@@ -5,8 +5,102 @@ from discord import app_commands
 from discord.ext import commands
 import config
 from cogs.security import is_staff, send_mod_log
+from cogs.ticket_transcript import generate_ticket_transcripts
 
 logger = logging.getLogger("epileptic.tickets")
+
+
+async def execute_ticket_close(channel: discord.TextChannel, closed_by: discord.User | discord.Member, client: discord.Client):
+    """Generates transcript, notifies user & mod-logs, and cleanly removes the ticket channel."""
+    guild = channel.guild
+
+    # 1. Notify that transcript generation is in progress
+    notify_embed = discord.Embed(
+        title="🔒 Archiving Ticket...",
+        description="Generating official transcript and closing ticket...",
+        color=config.EMBED_COLOR_WARNING
+    )
+    await channel.send(embed=notify_embed)
+
+    # 2. Fetch conversation history
+    messages = [msg async for msg in channel.history(limit=1000, oldest_first=True)]
+
+    # 3. Detect ticket owner from channel topic
+    owner = None
+    owner_id = None
+    topic = channel.topic or ""
+    for part in topic.split():
+        if part.isdigit() and len(part) >= 17:
+            owner_id = int(part)
+            break
+    if owner_id:
+        try:
+            owner = guild.get_member(owner_id) or await client.fetch_user(owner_id)
+        except Exception:
+            pass
+
+    # 4. Generate HTML and TXT transcripts
+    html_buf, txt_buf = generate_ticket_transcripts(guild, channel, messages, closed_by, owner)
+    filename_base = f"transcript-{channel.name}"
+
+    html_file = discord.File(fp=html_buf, filename=f"{filename_base}.html")
+    txt_file = discord.File(fp=txt_buf, filename=f"{filename_base}.txt")
+
+    # 5. Send Transcript to mod-logs channel
+    log_embed = discord.Embed(
+        title="🎫 [TRANSCRIPT] Support Ticket Closed",
+        description=(
+            f"**Channel:** `#{channel.name}`\n"
+            f"**Ticket Creator:** {owner.mention if owner else 'Unknown'} (`{owner_id or 'N/A'}`)\n"
+            f"**Closed By:** {closed_by.mention} (`{closed_by.id}`)\n"
+            f"**Total Messages:** `{len(messages)}`\n"
+            f"**Topic / Info:** {topic or 'N/A'}\n\n"
+            f"📎 *HTML and TXT transcript files attached below.*"
+        ),
+        color=config.EMBED_COLOR_DEFAULT
+    )
+    log_channel = discord.utils.find(
+        lambda c: any(kw in c.name.lower() for kw in ["mod-logs", "mod_logs", "logs", "audit", "transcripts"]),
+        guild.text_channels
+    )
+    if log_channel:
+        try:
+            await log_channel.send(embed=log_embed, files=[html_file, txt_file])
+            logger.info(f"Delivered ticket transcript for #{channel.name} to #{log_channel.name}.")
+        except Exception as e:
+            logger.warning(f"Could not send ticket transcript to mod-logs: {e}")
+
+    # 6. Send Transcript copy to Ticket Creator in DM
+    if owner:
+        try:
+            html_buf.seek(0)
+            txt_buf.seek(0)
+            dm_html_file = discord.File(fp=html_buf, filename=f"{filename_base}.html")
+            dm_txt_file = discord.File(fp=txt_buf, filename=f"{filename_base}.txt")
+
+            dm_embed = discord.Embed(
+                title="🎫 Your Support Ticket has been Closed",
+                description=(
+                    f"Hello **{owner.display_name}**,\n\n"
+                    f"Your support ticket **#{channel.name}** on **{guild.name}** has been closed by {closed_by.mention}.\n\n"
+                    f"A complete archive of the conversation is attached below for your records."
+                ),
+                color=config.RULES_EMBED_COLOR
+            )
+            if guild.icon:
+                dm_embed.set_thumbnail(url=guild.icon.url)
+            dm_embed.set_footer(text="Epileptic Community Support Desk")
+            await owner.send(embed=dm_embed, files=[dm_html_file, dm_txt_file])
+            logger.info(f"Delivered ticket transcript DM to {owner}.")
+        except Exception:
+            logger.info(f"Could not send ticket transcript DM to {owner} (DMs closed).")
+
+    # 7. Channel deletion
+    await asyncio.sleep(3)
+    try:
+        await channel.delete(reason=f"Ticket closed by {closed_by} (transcript saved)")
+    except Exception as e:
+        logger.error(f"Failed to delete ticket channel #{channel.name}: {e}")
 
 
 class TicketControlView(discord.ui.View):
@@ -40,25 +134,8 @@ class TicketControlView(discord.ui.View):
             await interaction.response.send_message("⛔ Only staff or the ticket creator can close this ticket.", ephemeral=True)
             return
 
-        await interaction.response.send_message("🔒 **Closing ticket:** This channel will be deleted in 5 seconds...")
-
-        # Логирование в mod-logs
-        log_embed = discord.Embed(
-            title="🎫 [AUDIT] Support Ticket Closed",
-            description=(
-                f"**Channel:** `#{channel.name}`\n"
-                f"**Closed By:** {interaction.user.mention} (`{interaction.user.id}`)\n"
-                f"**Topic:** {channel.topic or 'N/A'}"
-            ),
-            color=config.EMBED_COLOR_WARNING
-        )
-        await send_mod_log(guild, log_embed)
-
-        await asyncio.sleep(5)
-        try:
-            await channel.delete(reason=f"Ticket closed by {interaction.user}")
-        except Exception as e:
-            logger.error(f"Failed to delete ticket channel {channel.name}: {e}")
+        await interaction.response.defer()
+        await execute_ticket_close(channel, interaction.user, interaction.client)
 
 
 class TicketLaunchView(discord.ui.View):
@@ -236,6 +313,33 @@ class TicketsCog(commands.Cog, name="Tickets"):
             f"✅ Ticket panel published to {target_ch.mention}!",
             ephemeral=True
         )
+
+    @app_commands.command(
+        name="close_ticket",
+        description="Close the current ticket, save full transcripts (HTML & TXT), and archive it."
+    )
+    async def close_ticket(self, interaction: discord.Interaction):
+        """Allows staff or the ticket creator to close the ticket and generate transcripts."""
+        channel = interaction.channel
+        guild = interaction.guild
+
+        if not guild or not channel or not channel.name.startswith("ticket-"):
+            await interaction.response.send_message("This command can only be used inside an active ticket channel.", ephemeral=True)
+            return
+
+        is_staff_member = (
+            interaction.user.id == guild.owner_id
+            or interaction.user.guild_permissions.administrator
+            or any(r.name.lower() in config.STAFF_ROLE_NAMES for r in interaction.user.roles)
+        )
+        is_owner = str(interaction.user.id) in (channel.topic or "")
+
+        if not is_staff_member and not is_owner:
+            await interaction.response.send_message("⛔ Only staff or the ticket creator can close this ticket.", ephemeral=True)
+            return
+
+        await interaction.response.defer()
+        await execute_ticket_close(channel, interaction.user, interaction.client)
 
 
 async def setup(bot: commands.Bot):
