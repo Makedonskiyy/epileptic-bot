@@ -275,61 +275,6 @@ class SetupServerCog(commands.Cog, name="Server Setup"):
         await send_mod_log(guild, audit_embed)
 
     @app_commands.command(
-        name="assign_unverified_all",
-        description="Assign the Not Verified role to all members who currently lack the Member role (Owner only)."
-    )
-    @is_owner()
-    async def assign_unverified_all(self, interaction: discord.Interaction):
-        """Assigns Not Verified role to existing unverified members."""
-        await interaction.response.defer(ephemeral=True)
-        guild = interaction.guild
-
-        not_verified_role = find_role_by_key(guild, "unverified", config.UNVERIFIED_ROLE_NAME)
-        member_role = find_role_by_key(guild, "member", config.MEMBER_ROLE_NAME)
-        staff_roles = self._get_staff_roles(guild)
-
-        if not not_verified_role:
-            await interaction.followup.send(
-                f"❌ Role `{config.UNVERIFIED_ROLE_NAME}` was not found on the server.",
-                ephemeral=True
-            )
-            return
-
-        if guild.me.top_role.position <= not_verified_role.position:
-            await interaction.followup.send(
-                f"⚠️ The bot's role (**{guild.me.top_role.name}**) is below **{not_verified_role.name}**!\n"
-                "Please raise the bot's role higher in Server Settings.",
-                ephemeral=True
-            )
-            return
-
-        assigned_count = 0
-        skipped_count = 0
-
-        for member in guild.members:
-            if member.bot:
-                continue
-            is_staff_mem = any(r in staff_roles for r in member.roles)
-            has_member = member_role and (member_role in member.roles)
-
-            if not has_member and not is_staff_mem and not_verified_role not in member.roles:
-                try:
-                    await member.add_roles(not_verified_role, reason="Bulk synchronization of Not Verified role")
-                    assigned_count += 1
-                except Exception as e:
-                    logger.warning(f"Could not assign role to {member}: {e}")
-            else:
-                skipped_count += 1
-
-        embed = discord.Embed(
-            title="👥 Unverified Role Synchronization Complete",
-            color=config.EMBED_COLOR_SUCCESS
-        )
-        embed.add_field(name="Assigned @Not Verified", value=f"**{assigned_count}** members", inline=True)
-        embed.add_field(name="Already Verified / Staff", value=f"**{skipped_count}** members", inline=True)
-        await interaction.followup.send(embed=embed, ephemeral=True)
-
-    @app_commands.command(
         name="setup_community_channels",
         description="Configures official Rules [✓📖] and Announcement [📢] channels (requires Community feature)."
     )

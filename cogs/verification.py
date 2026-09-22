@@ -1,9 +1,10 @@
 import re
 import time
+import asyncio
 import logging
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 import config
 from cogs.security import security_manager, send_mod_log, is_staff
 from cogs.welcome_card import create_welcome_card, get_ordinal
@@ -66,7 +67,7 @@ def find_role_by_key(guild: discord.Guild, key: str, configured_name: str) -> di
 async def execute_verification(
     guild: discord.Guild,
     member: discord.Member,
-    ignore_account_age: bool = False
+    ignore_account_age: bool = True
 ) -> tuple[bool, str]:
     """
     Executes verification with anti-abuse and security guards:
@@ -265,6 +266,10 @@ class VerificationCog(commands.Cog, name="Verification"):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.auto_sync_task.start()
+
+    def cog_unload(self):
+        self.auto_sync_task.cancel()
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
@@ -550,256 +555,121 @@ class VerificationCog(commands.Cog, name="Verification"):
             ephemeral=True
         )
 
-    @app_commands.command(
-        name="diagnose_roles",
-        description="Diagnose server roles, bot hierarchy, permissions, and member verification breakdown."
-    )
-    @is_staff()
-    async def diagnose_roles(self, interaction: discord.Interaction):
-        """Diagnostic report of server roles, hierarchy, and onboarding configuration."""
-        guild = interaction.guild
-        await interaction.response.defer(ephemeral=True)
+    async def _run_full_auto_sync(self, guild: discord.Guild):
+        """
+        Completely automated role synchronization:
+        1. Checks bot permissions and Discord role hierarchy.
+        2. Auto-verifies anyone who already reacted with ✅ under the rules message.
+        3. Auto-assigns @Not Verified to any member who lacks Member and is not Staff.
+        """
+        if not guild or not guild.me.guild_permissions.manage_roles:
+            return
 
         unverified_role = find_role_by_key(guild, "unverified", config.UNVERIFIED_ROLE_NAME)
         member_role = find_role_by_key(guild, "member", config.MEMBER_ROLE_NAME)
-        premium_role = find_role_by_key(guild, "premium", config.PREMIUM_ROLE_NAME)
 
-        bot_top_role = guild.me.top_role
-        has_manage_roles = guild.me.guild_permissions.manage_roles
-        has_admin = guild.me.guild_permissions.administrator
-
-        total_members = guild.member_count or len(guild.members)
-        m_count = len(member_role.members) if member_role else 0
-        u_count = len(unverified_role.members) if unverified_role else 0
-        p_count = len(premium_role.members) if premium_role else 0
-
-        # Count members with neither role
-        neither_count = 0
-        for m in guild.members:
-            if not m.bot:
-                has_m = member_role in m.roles if member_role else False
-                has_u = unverified_role in m.roles if unverified_role else False
-                if not has_m and not has_u:
-                    neither_count += 1
-
-        def role_status(r: discord.Role | None, label: str) -> str:
-            if not r:
-                return f"❌ **Not Found!** (configured: `{label}`)"
-            can_manage = bot_top_role.position > r.position
-            h_icon = "🟢 OK" if can_manage else "🔴 **BELOW BOT ROLE!**"
-            return f"`@{r.name}` (ID: `{r.id}`) — Hierarchy: {h_icon}"
-
-        embed = discord.Embed(
-            title="🔍 Role & Verification Diagnostics",
-            color=config.EMBED_COLOR_DEFAULT
-        )
-
-        embed.add_field(
-            name="🤖 Bot Permissions & Hierarchy",
-            value=(
-                f"• Top Role: **@{bot_top_role.name}** (Position: `{bot_top_role.position}`)\n"
-                f"• Manage Roles Permission: {'✅ Yes' if has_manage_roles else '❌ **NO (Cannot assign roles!)**'}\n"
-                f"• Administrator: {'✅ Yes' if has_admin else '⚪ No'}"
-            ),
-            inline=False
-        )
-
-        embed.add_field(
-            name="🎭 Role Detection Status",
-            value=(
-                f"• **Unverified Role:** {role_status(unverified_role, config.UNVERIFIED_ROLE_NAME)}\n"
-                f"• **Member Role:** {role_status(member_role, config.MEMBER_ROLE_NAME)}\n"
-                f"• **Premium Role:** {role_status(premium_role, config.PREMIUM_ROLE_NAME)}"
-            ),
-            inline=False
-        )
-
-        embed.add_field(
-            name="👥 Member Distribution",
-            value=(
-                f"• Total Members: **{total_members}**\n"
-                f"• Verified (@{member_role.name if member_role else 'Member'}): **{m_count}**\n"
-                f"• Unverified (@{unverified_role.name if unverified_role else 'Not Verified'}): **{u_count}**\n"
-                f"• Neither Role: **{neither_count}**\n"
-                f"• Premium (@{premium_role.name if premium_role else 'Premium'}): **{p_count}**"
-            ),
-            inline=False
-        )
-
-        embed.add_field(
-            name="🛡️ Security Settings",
-            value=(
-                f"• Min Account Age: **{config.MIN_ACCOUNT_AGE_HOURS} hours** "
-                f"({'⚠️ Blocks accounts < 24h old' if config.MIN_ACCOUNT_AGE_HOURS > 0 else '🟢 Disabled, allows all accounts'})\n"
-                f"• Click Cooldown: **{config.VERIFY_COOLDOWN_SECONDS}s**"
-            ),
-            inline=False
-        )
-
-        recommendations = []
+        # Auto-create Not Verified role if completely missing from server
         if not unverified_role:
-            recommendations.append("⚠️ Role `Not Verified` was not found. The bot will auto-create it on next join, or you can create it in Server Settings.")
-        elif bot_top_role.position <= unverified_role.position:
-            recommendations.append(f"🚨 **Critical:** Drag bot role (`@{bot_top_role.name}`) ABOVE `@{unverified_role.name}` in Server Settings -> Roles!")
+            try:
+                unverified_role = await guild.create_role(
+                    name="Not Verified",
+                    reason="Epileptic Bot: Auto-creating missing unverified role",
+                    color=discord.Color.from_rgb(140, 140, 140)
+                )
+                logger.info(f"Auto-created Not Verified role on {guild.name}.")
+            except Exception as cr_err:
+                logger.warning(f"Could not auto-create unverified role: {cr_err}")
 
-        if not member_role:
-            recommendations.append(f"⚠️ Role `Member` was not found. Please create role `Member` in Server Settings.")
-        elif bot_top_role.position <= member_role.position:
-            recommendations.append(f"🚨 **Critical:** Drag bot role (`@{bot_top_role.name}`) ABOVE `@{member_role.name}` in Server Settings -> Roles!")
+        if not unverified_role or not member_role:
+            return
 
-        if config.MIN_ACCOUNT_AGE_HOURS > 0:
-            recommendations.append("💡 To verify all new accounts immediately without waiting 24h, run `/set_min_account_age hours:0`.")
-
-        if neither_count > 0:
-            recommendations.append(f"💡 Run `/assign_unverified_all` to give `@Not Verified` to the {neither_count} members with no roles.")
-
-        recommendations.append("💡 Run `/verify_all_reactors` to verify everyone who clicked ✅ on the rules message!")
-
-        embed.add_field(name="📋 Recommendations & Actions", value="\n".join(recommendations), inline=False)
-        embed.set_footer(text="Epileptic Server Guard")
-        await interaction.followup.send(embed=embed, ephemeral=True)
-
-    @app_commands.command(
-        name="verify_all_reactors",
-        description="Verify all members who clicked ✅ on the rules message (bypassing account age check)."
-    )
-    @app_commands.describe(
-        rules_channel="Channel where rules message is posted (defaults to #rules)",
-        ignore_age_check="Allow accounts newer than 24h to verify (default: True)"
-    )
-    @is_staff()
-    async def verify_all_reactors(
-        self,
-        interaction: discord.Interaction,
-        rules_channel: discord.TextChannel = None,
-        ignore_age_check: bool = True
-    ):
-        """Bulk verifies everyone who clicked the ✅ reaction on the rules message."""
-        await interaction.response.defer(ephemeral=True)
-        guild = interaction.guild
-
-        member_role = find_role_by_key(guild, "member", config.MEMBER_ROLE_NAME)
-        unverified_role = find_role_by_key(guild, "unverified", config.UNVERIFIED_ROLE_NAME)
-
-        if not member_role:
-            await interaction.followup.send(
-                f"❌ Role `{config.MEMBER_ROLE_NAME}` was not found. Please create it first.",
-                ephemeral=True
+        # Discord Hierarchy Check: Bot must be placed ABOVE Member and Not Verified
+        if guild.me.top_role.position <= member_role.position or guild.me.top_role.position <= unverified_role.position:
+            logger.debug(
+                f"Bot role '{guild.me.top_role.name}' is below Member/Not Verified in {guild.name}. "
+                "Waiting for server admin to drag bot role higher."
             )
             return
 
-        if guild.me.top_role.position <= member_role.position:
-            await interaction.followup.send(
-                f"🚨 **Role Hierarchy Error:** The bot's role (**{guild.me.top_role.name}**) is below **{member_role.name}**!\n"
-                f"Open Server Settings -> Roles and drag the bot's role higher.",
-                ephemeral=True
-            )
-            return
+        # Ensure guild members cache is populated
+        if not guild.chunked:
+            try:
+                await guild.chunk()
+            except Exception:
+                pass
 
-        r_ch = rules_channel or discord.utils.find(
+        # 1. Auto-verify all members who reacted with ✅ in rules channel
+        rules_channel = discord.utils.find(
             lambda c: any(kw in c.name.lower() for kw in ["rules", "правил"]),
             guild.text_channels
         )
-        if not r_ch:
-            await interaction.followup.send("❌ Rules channel not found. Please specify it in command arguments.", ephemeral=True)
-            return
-
-        # Find message with checkmark reaction
-        target_message = None
-        async for msg in r_ch.history(limit=50):
-            for rx in msg.reactions:
-                if str(rx.emoji) in ["✅", "✔", "☑️"] and rx.count > 0:
-                    target_message = msg
-                    break
-            if target_message:
-                break
-
-        if not target_message:
-            await interaction.followup.send(f"❌ No message with ✅ reaction found in {r_ch.mention}.", ephemeral=True)
-            return
-
-        # Fetch all users who reacted with ✅
-        reactors = []
-        for rx in target_message.reactions:
-            if str(rx.emoji) in ["✅", "✔", "☑️"]:
-                async for user in rx.users():
-                    if not user.bot:
-                        reactors.append(user)
-
-        verified_count = 0
-        already_verified = 0
-        skipped_age = 0
-        failed_count = 0
-
-        for user in reactors:
-            member = guild.get_member(user.id)
-            if not member:
-                try:
-                    member = await guild.fetch_member(user.id)
-                except Exception:
-                    continue
-
-            if member_role in member.roles:
-                already_verified += 1
-                continue
-
-            # Account age check if enabled
-            if not ignore_age_check:
-                age_ok, _ = security_manager.check_account_age(member)
-                if not age_ok:
-                    skipped_age += 1
-                    continue
-
+        if rules_channel:
             try:
-                roles_to_remove = []
-                if unverified_role and unverified_role in member.roles:
-                    roles_to_remove.append(unverified_role)
-                if roles_to_remove:
-                    await member.remove_roles(*roles_to_remove, reason="Bulk reaction verification")
-                await member.add_roles(member_role, reason="Bulk reaction verification from rules checkmark")
-                verified_count += 1
+                async for msg in rules_channel.history(limit=25):
+                    for rx in msg.reactions:
+                        if str(rx.emoji) in ["✅", "✔", "☑️"] and rx.count > 0:
+                            async for user in rx.users():
+                                if user.bot:
+                                    continue
+                                m = guild.get_member(user.id)
+                                if not m:
+                                    try:
+                                        m = await guild.fetch_member(user.id)
+                                    except Exception:
+                                        continue
+                                if m and member_role not in m.roles:
+                                    try:
+                                        roles_to_remove = [r for r in [unverified_role] if r in m.roles]
+                                        if roles_to_remove:
+                                            await m.remove_roles(*roles_to_remove, reason="Auto-sync: rules reaction accepted")
+                                        await m.add_roles(member_role, reason="Auto-sync: rules reaction accepted")
+                                        logger.info(f"Auto-verified reactor {m} ({m.id}) with Member role.")
+                                        await asyncio.sleep(0.3)
+                                    except Exception as e:
+                                        logger.warning(f"Auto-sync reactor error for {m}: {e}")
             except Exception as e:
-                logger.warning(f"Could not bulk verify {member}: {e}")
-                failed_count += 1
+                logger.debug(f"Auto-sync rules reactions scan error: {e}")
 
-        embed = discord.Embed(
-            title="✅ Bulk Reaction Verification Complete",
-            color=config.EMBED_COLOR_SUCCESS
-        )
-        embed.add_field(name="Newly Verified", value=f"**{verified_count}** members", inline=True)
-        embed.add_field(name="Already Verified", value=f"**{already_verified}** members", inline=True)
-        if skipped_age > 0:
-            embed.add_field(name="Skipped (<24h old)", value=f"**{skipped_age}** members", inline=True)
-        if failed_count > 0:
-            embed.add_field(name="Failed (Permissions)", value=f"**{failed_count}** members", inline=True)
+        # 2. Auto-assign Not Verified role to all members who have neither Member nor Staff roles
+        staff_names = set(config.STAFF_ROLE_NAMES)
+        for m in guild.members:
+            if m.bot:
+                continue
+            is_staff = any(r.name.lower() in staff_names for r in m.roles) or m.guild_permissions.administrator
+            has_member = member_role in m.roles
+            has_unverified = unverified_role in m.roles
 
-        embed.set_footer(text=f"Processed {len(reactors)} total reaction clicks from #{r_ch.name}")
-        await interaction.followup.send(embed=embed, ephemeral=True)
+            if not has_member and not is_staff and not has_unverified:
+                try:
+                    await m.add_roles(unverified_role, reason="Auto-sync: onboarding unverified role")
+                    logger.info(f"Auto-assigned Not Verified to {m} ({m.id})")
+                    await asyncio.sleep(0.3)
+                except Exception as e:
+                    logger.warning(f"Auto-sync unverified error for {m}: {e}")
 
-    @app_commands.command(
-        name="set_min_account_age",
-        description="Set minimum account age in hours required to verify (set 0 to allow all accounts)."
-    )
-    @app_commands.describe(hours="Minimum account age in hours (e.g. 0 to disable, 1, 24)")
-    @is_staff()
-    async def set_min_account_age(self, interaction: discord.Interaction, hours: int):
-        """Live updates MIN_ACCOUNT_AGE_HOURS threshold."""
-        if hours < 0:
-            await interaction.response.send_message("Hours cannot be negative.", ephemeral=True)
-            return
+    @tasks.loop(seconds=30)
+    async def auto_sync_task(self):
+        """Runs periodic automatic role synchronization across all guilds."""
+        for guild in self.bot.guilds:
+            try:
+                await self._run_full_auto_sync(guild)
+            except Exception as e:
+                logger.debug(f"Error in auto_sync_task for guild {guild.id}: {e}")
 
-        config.MIN_ACCOUNT_AGE_HOURS = hours
-        if hours == 0:
-            msg = "🟢 **Account age check disabled!** All Discord accounts (including brand new accounts) can now self-verify instantly."
-        else:
-            msg = f"🛡️ **Minimum account age set to {hours} hour(s).** Accounts newer than this will be blocked from self-verifying."
+    @auto_sync_task.before_loop
+    async def before_auto_sync_task(self):
+        await self.bot.wait_until_ready()
 
-        embed = discord.Embed(
-            title="⚙️ Verification Security Setting Updated",
-            description=msg,
-            color=config.EMBED_COLOR_SUCCESS
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+    @commands.Cog.listener()
+    async def on_guild_role_update(self, before: discord.Role, after: discord.Role):
+        """Immediately syncs roles when admin drags roles in Discord Server Settings."""
+        await self._run_full_auto_sync(after.guild)
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        """Run sync as soon as bot connects."""
+        for guild in self.bot.guilds:
+            await self._run_full_auto_sync(guild)
 
 
 async def setup(bot: commands.Bot):

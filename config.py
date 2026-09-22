@@ -30,7 +30,7 @@ ROLE_ALIASES = {
 }
 
 # Security & Anti-Abuse Settings
-MIN_ACCOUNT_AGE_HOURS = int(os.getenv("MIN_ACCOUNT_AGE_HOURS", "24")) # Minimum Discord account age to self-verify (0 to disable)
+MIN_ACCOUNT_AGE_HOURS = int(os.getenv("MIN_ACCOUNT_AGE_HOURS", "0")) # Default 0 allows all accounts to self-verify instantly
 VERIFY_COOLDOWN_SECONDS = int(os.getenv("VERIFY_COOLDOWN_SECONDS", "10")) # Cooldown between verification clicks per user
 ANTI_RAID_JOIN_THRESHOLD = int(os.getenv("ANTI_RAID_JOIN_THRESHOLD", "10")) # Number of joins in window to trigger raid alert
 ANTI_RAID_WINDOW_SECONDS = int(os.getenv("ANTI_RAID_WINDOW_SECONDS", "15"))
