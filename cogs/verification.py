@@ -2,8 +2,6 @@ import re
 import time
 import asyncio
 import logging
-import sqlite3
-from pathlib import Path
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -245,46 +243,10 @@ class VerificationCog(commands.Cog, name="Verification"):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.db_path = Path("data") / "analytics.db"
-        self._init_reminders_table()
-        self._reminded_unverified: set[int] = self._load_reminded_users()
         self.auto_sync_task.start()
 
     def cog_unload(self):
         self.auto_sync_task.cancel()
-
-    def _init_reminders_table(self):
-        try:
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS verification_reminders (
-                        user_id INTEGER PRIMARY KEY,
-                        reminded_at REAL NOT NULL
-                    )
-                """)
-        except Exception as e:
-            logger.warning(f"Could not init verification_reminders table: {e}")
-
-    def _load_reminded_users(self) -> set[int]:
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT user_id FROM verification_reminders")
-                return {row[0] for row in cursor.fetchall()}
-        except Exception:
-            return set()
-
-    def _mark_user_reminded(self, user_id: int):
-        self._reminded_unverified.add(user_id)
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute(
-                    "INSERT OR REPLACE INTO verification_reminders (user_id, reminded_at) VALUES (?, ?)",
-                    (user_id, time.time())
-                )
-        except Exception as e:
-            logger.debug(f"Error persisting reminder for user {user_id}: {e}")
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
@@ -371,55 +333,14 @@ class VerificationCog(commands.Cog, name="Verification"):
                     server_name=guild.name
                 )
 
-                rules_channel = discord.utils.find(
-                    lambda c: any(kw in c.name.lower() for kw in ["rules", "правил"]),
-                    guild.text_channels
-                )
-                rules_ref = rules_channel.mention if rules_channel else "#rules"
-
                 ordinal_str = get_ordinal(count)
-                content_text = (
-                    f"Welcome {member.mention} to **{guild.name}**! You are the {ordinal_str} member!\n"
-                    f"👉 **To get full access and unlock community chats, head to {rules_ref} and click ✅!**"
-                )
+                content_text = f"Welcome {member.mention} to **{guild.name}**! You are the {ordinal_str} member!"
                 welcome_file = discord.File(fp=card_buffer, filename="welcome.png")
 
                 await welcome_channel.send(content=content_text, file=welcome_file)
                 logger.info(f"Sent visual welcome card for {member} in #{welcome_channel.name} (count: {count}).")
             except Exception as e:
                 logger.warning(f"Failed to post welcome card in {welcome_channel.name}: {e}")
-
-        # 3. Send friendly onboarding guide in DM
-        try:
-            rules_channel = discord.utils.find(
-                lambda c: any(kw in c.name.lower() for kw in ["rules", "правил"]),
-                guild.text_channels
-            )
-            rules_name = f"#{rules_channel.name}" if rules_channel else "#rules"
-            onboard_embed = discord.Embed(
-                title=f"⚡ Welcome to {guild.name}!",
-                description=(
-                    f"Hey **{member.display_name}**, glad to have you on board!\n\n"
-                    f"🔒 **How to get verified & start chatting:**\n"
-                    f"1. Open the **{rules_name}** channel.\n"
-                    f"2. Read our community rules.\n"
-                    f"3. Click the **✅** reaction under the rules message.\n\n"
-                    f"Once clicked, your **@Member** role is granted automatically and all server channels unlock! 🚀"
-                ),
-                color=config.RULES_EMBED_COLOR
-            )
-            if guild.icon:
-                onboard_embed.set_thumbnail(url=guild.icon.url)
-            onboard_embed.set_footer(
-                text=f"{guild.name} • Onboarding",
-                icon_url=guild.me.display_avatar.url if guild.me else None
-            )
-            await member.send(embed=onboard_embed)
-            logger.info(f"Sent onboarding welcome DM to {member} ({member.id}).")
-        except discord.Forbidden:
-            logger.debug(f"User {member} has DMs disabled.")
-        except Exception as dm_err:
-            logger.debug(f"Could not send onboarding DM to {member}: {dm_err}")
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
@@ -699,51 +620,8 @@ class VerificationCog(commands.Cog, name="Verification"):
                 try:
                     await m.add_roles(unverified_role, reason="Auto-sync: onboarding unverified role")
                     logger.info(f"Auto-assigned Not Verified to {m} ({m.id})")
-                    await asyncio.sleep(0.3)
-                except Exception as e:
-                    logger.warning(f"Auto-sync unverified error for {m}: {e}")
-
         # 3. Enforce thread locks & clean up unauthorized threads in read-only channels
         await self._lock_and_clean_threads(guild, member_role, unverified_role)
-
-        # 4. Smart reminder for unverified members who joined > 15 minutes ago
-        now = time.time()
-        for m in guild.members:
-            if m.bot:
-                continue
-            is_staff = any(r.name.lower() in staff_names for r in m.roles) or m.guild_permissions.administrator
-            has_member = member_role in m.roles
-            if not has_member and not is_staff and m.joined_at:
-                joined_ts = m.joined_at.timestamp()
-                if (now - joined_ts) >= 900:  # 15 minutes
-                    if m.id not in self._reminded_unverified:
-                        self._mark_user_reminded(m.id)
-                        try:
-                            rules_channel = discord.utils.find(
-                                lambda c: any(kw in c.name.lower() for kw in ["rules", "правил"]),
-                                guild.text_channels
-                            )
-                            rules_name = f"#{rules_channel.name}" if rules_channel else "#rules"
-                            remind_embed = discord.Embed(
-                                title="🔔 Friendly Reminder: Unlock Your Server Access",
-                                description=(
-                                    f"Hey **{m.display_name}**! 👋\n\n"
-                                    f"We noticed you haven't verified your account on **{guild.name}** yet.\n"
-                                    f"Public discussions, AI prompts, and resources are currently locked for you.\n\n"
-                                    f"👉 Just head over to **{rules_name}** and click **✅** to unlock full access in 1 second!"
-                                ),
-                                color=config.EMBED_COLOR_WARNING
-                            )
-                            if guild.icon:
-                                remind_embed.set_thumbnail(url=guild.icon.url)
-                            remind_embed.set_footer(
-                                text=f"{guild.name} • Verification",
-                                icon_url=guild.me.display_avatar.url if guild.me else None
-                            )
-                            await m.send(embed=remind_embed)
-                            logger.info(f"Sent 15-minute verification reminder DM to {m} ({m.id}).")
-                        except Exception as rem_err:
-                            logger.debug(f"Could not send reminder DM to {m}: {rem_err}")
 
     async def _lock_and_clean_threads(
         self,
