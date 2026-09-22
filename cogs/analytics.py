@@ -180,25 +180,23 @@ class AnalyticsCog(commands.Cog, name="Analytics"):
 
         for guild in self.bot.guilds:
             try:
-                # 1. Daily Report (evaluated once per calendar day UTC)
-                today_key = now.strftime("%Y-%m-%d")
-                if not analytics_db.is_report_sent(guild.id, "daily", today_key):
-                    # Only dispatch at or after 00:00 UTC
-                    start_of_day = datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp()
-                    # Calculate yesterday's metrics (from 24h before start_of_day to start_of_day)
-                    prev_start = start_of_day - 86400
-                    joins, leaves, net = analytics_db.get_counts(guild.id, prev_start, start_of_day)
+                # 1. Daily Report: Sent strictly once per calendar day during the midnight window (00:00 - 01:00 UTC)
+                if now.hour == 0:
+                    today_key = now.strftime("%Y-%m-%d")
+                    if not analytics_db.is_report_sent(guild.id, "daily", today_key):
+                        start_of_day = datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp()
+                        prev_start = start_of_day - 86400
+                        joins, leaves, net = analytics_db.get_counts(guild.id, prev_start, start_of_day)
 
-                    # Only send if there was some activity or previous day completed
-                    yesterday_label = (now - timedelta(days=1)).strftime("%B %d, %Y")
-                    embed = build_report_embed(guild, "daily", joins, leaves, net, yesterday_label)
-                    sent = await send_mod_log(guild, embed)
-                    if sent:
-                        analytics_db.mark_report_sent(guild.id, "daily", today_key)
-                        logger.info(f"Delivered daily analytics report for {guild.name} ({today_key}).")
+                        yesterday_label = (now - timedelta(days=1)).strftime("%B %d, %Y")
+                        embed = build_report_embed(guild, "daily", joins, leaves, net, yesterday_label)
+                        sent = await send_mod_log(guild, embed)
+                        if sent:
+                            analytics_db.mark_report_sent(guild.id, "daily", today_key)
+                            logger.info(f"Delivered daily analytics report for {guild.name} ({today_key}).")
 
-                # 2. Weekly Report (evaluated on Monday UTC)
-                if now.weekday() == 0:  # Monday
+                # 2. Weekly Report: Sent strictly once per week on Monday midnight (00:00 - 01:00 UTC)
+                if now.weekday() == 0 and now.hour == 0:
                     week_key = now.strftime("%Y-W%W")
                     if not analytics_db.is_report_sent(guild.id, "weekly", week_key):
                         start_of_today = datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp()
@@ -212,12 +210,11 @@ class AnalyticsCog(commands.Cog, name="Analytics"):
                             analytics_db.mark_report_sent(guild.id, "weekly", week_key)
                             logger.info(f"Delivered weekly analytics report for {guild.name} ({week_key}).")
 
-                # 3. Monthly Report (evaluated on the 1st of each month UTC)
-                if now.day == 1:
+                # 3. Monthly Report: Sent strictly on the 1st of each month midnight (00:00 - 01:00 UTC)
+                if now.day == 1 and now.hour == 0:
                     month_key = now.strftime("%Y-%m")
                     if not analytics_db.is_report_sent(guild.id, "monthly", month_key):
                         start_of_today = datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp()
-                        # Approximate previous 30 days
                         month_ago = start_of_today - (30 * 86400)
                         joins, leaves, net = analytics_db.get_counts(guild.id, month_ago, start_of_today)
 

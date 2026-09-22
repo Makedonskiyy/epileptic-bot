@@ -89,10 +89,10 @@ class SecurityManager:
 security_manager = SecurityManager()
 
 
-async def send_mod_log(guild: discord.Guild, embed: discord.Embed):
-    """Отправка логов в канал mod-logs (например 📊・mod-logs)."""
+async def send_mod_log(guild: discord.Guild, embed: discord.Embed) -> bool:
+    """Отправка логов в канал mod-logs (например 📊・mod-logs). Возвращает True при успешной отправке."""
     if not guild:
-        return
+        return False
     log_channel = discord.utils.find(
         lambda c: any(kw in c.name.lower() for kw in ["mod-logs", "mod_logs", "logs", "audit"]),
         guild.text_channels
@@ -100,8 +100,11 @@ async def send_mod_log(guild: discord.Guild, embed: discord.Embed):
     if log_channel:
         try:
             await log_channel.send(embed=embed)
+            return True
         except Exception as e:
             logger.warning(f"Could not send log to {log_channel.name}: {e}")
+            return False
+    return False
 
 
 def is_staff():
