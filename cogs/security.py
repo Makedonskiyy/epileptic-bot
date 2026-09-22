@@ -231,6 +231,77 @@ class SecurityCog(commands.Cog, name="Security"):
             await send_mod_log(message.guild, log_embed)
             logger.info(f"Deleted unauthorized invite link from {message.author} in #{message.channel.name}")
 
+    @commands.Cog.listener()
+    async def on_thread_create(self, thread: discord.Thread):
+        """Prevents thread creation in read-only / closed information channels."""
+        parent = thread.parent
+        if not parent or not isinstance(parent, discord.TextChannel):
+            return
+
+        guild = thread.guild
+        if not guild:
+            return
+
+        creator = None
+        if thread.owner_id:
+            creator = guild.get_member(thread.owner_id)
+
+        is_staff_creator = False
+        if creator:
+            is_staff_creator = (
+                creator.id == guild.owner_id
+                or creator.guild_permissions.administrator
+                or any(r.name.lower() in config.STAFF_ROLE_NAMES for r in creator.roles)
+            )
+
+        if is_staff_creator:
+            return
+
+        read_only_keywords = [
+            "rules", "правил", "announc", "объявлен", "welcome", "приветств",
+            "access", "доступ", "faq", "инфо", "info"
+        ]
+        p_name = parent.name.lower()
+        is_locked_channel = any(kw in p_name for kw in read_only_keywords)
+
+        if not is_locked_channel:
+            if parent.category and any(kw in parent.category.name.upper() for kw in ["INFO", "ИНФО"]):
+                is_locked_channel = True
+            else:
+                ow = parent.overwrites_for(guild.default_role)
+                if ow.send_messages is False:
+                    is_locked_channel = True
+
+        if is_locked_channel:
+            thread_name = thread.name
+            try:
+                await thread.delete()
+                logger.info(f"Auto-deleted unauthorized thread '{thread_name}' in #{parent.name}")
+            except Exception as e:
+                logger.warning(f"Failed to auto-delete thread '{thread_name}': {e}")
+                return
+
+            alert_embed = discord.Embed(
+                title="🔒 [SECURITY] Unauthorized Thread Deleted",
+                description=(
+                    f"**Channel:** {parent.mention}\n"
+                    f"**Thread:** `{thread_name}`\n"
+                    f"**User:** {creator.mention if creator else f'ID: {thread.owner_id}'}\n"
+                    f"**Action:** Thread was automatically deleted (threads forbidden in read-only channels)."
+                ),
+                color=config.EMBED_COLOR_WARNING
+            )
+            await send_mod_log(guild, alert_embed)
+
+            if creator and not creator.bot:
+                try:
+                    await creator.send(
+                        f"⚠️ Creating threads in {parent.mention} is disabled.\n"
+                        f"Please ask your question in our community chat or open a support ticket in **#support-tickets**."
+                    )
+                except Exception:
+                    pass
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(SecurityCog(bot))

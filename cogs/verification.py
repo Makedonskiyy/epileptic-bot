@@ -643,9 +643,88 @@ class VerificationCog(commands.Cog, name="Verification"):
                 try:
                     await m.add_roles(unverified_role, reason="Auto-sync: onboarding unverified role")
                     logger.info(f"Auto-assigned Not Verified to {m} ({m.id})")
-                    await asyncio.sleep(0.3)
+        # 3. Enforce thread locks & clean up unauthorized threads in read-only channels
+        await self._lock_and_clean_threads(guild, member_role, unverified_role)
+
+    async def _lock_and_clean_threads(
+        self,
+        guild: discord.Guild,
+        member_role: discord.Role | None,
+        unverified_role: discord.Role | None
+    ):
+        """
+        Disables thread creation across all read-only channels and deletes any existing threads.
+        """
+        if not guild.me.guild_permissions.manage_channels:
+            return
+
+        roles_to_restrict = [guild.default_role]
+        if member_role:
+            roles_to_restrict.append(member_role)
+        if unverified_role:
+            roles_to_restrict.append(unverified_role)
+
+        read_only_keywords = [
+            "rules", "правил", "announc", "объявлен", "welcome", "приветств",
+            "access", "доступ", "faq", "инфо", "info"
+        ]
+
+        for channel in guild.text_channels:
+            p_name = channel.name.lower()
+            is_info_cat = channel.category and any(kw in channel.category.name.upper() for kw in ["INFO", "ИНФО"])
+            is_readonly = is_info_cat or any(kw in p_name for kw in read_only_keywords)
+
+            if not is_readonly:
+                ow = channel.overwrites_for(guild.default_role)
+                if ow.send_messages is False:
+                    is_readonly = True
+
+            if is_readonly:
+                # 1. Update channel permissions to deny thread creation
+                changed = False
+                new_overwrites = dict(channel.overwrites)
+                for r in roles_to_restrict:
+                    current_ow = new_overwrites.get(r, discord.PermissionOverwrite())
+                    if (
+                        current_ow.create_public_threads is not False
+                        or current_ow.create_private_threads is not False
+                        or current_ow.send_messages_in_threads is not False
+                    ):
+                        current_ow.create_public_threads = False
+                        current_ow.create_private_threads = False
+                        current_ow.send_messages_in_threads = False
+                        new_overwrites[r] = current_ow
+                        changed = True
+
+                if changed:
+                    try:
+                        await channel.edit(overwrites=new_overwrites)
+                        logger.info(f"Enforced thread locks on #{channel.name}")
+                    except Exception as e:
+                        logger.warning(f"Could not update thread overwrites for #{channel.name}: {e}")
+
+                # 2. Delete any existing threads in this channel (e.g. 'helloo', 'Muse 1.3 jail break needed')
+                try:
+                    for th in channel.threads:
+                        try:
+                            t_name = th.name
+                            await th.delete()
+                            logger.info(f"Auto-deleted existing thread '{t_name}' in #{channel.name}")
+                        except Exception as th_err:
+                            logger.warning(f"Could not delete thread {th.name}: {th_err}")
                 except Exception as e:
-                    logger.warning(f"Auto-sync unverified error for {m}: {e}")
+                    logger.debug(f"Error checking active threads in #{channel.name}: {e}")
+
+                try:
+                    async for th in channel.archived_threads(limit=25):
+                        try:
+                            t_name = th.name
+                            await th.delete()
+                            logger.info(f"Auto-deleted archived thread '{t_name}' in #{channel.name}")
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
     @tasks.loop(seconds=30)
     async def auto_sync_task(self):
