@@ -8,6 +8,8 @@ load_dotenv(BASE_DIR / ".env")
 # Discord Bot Core Settings
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 GUILD_ID = int(os.getenv("GUILD_ID")) if os.getenv("GUILD_ID") and os.getenv("GUILD_ID").isdigit() else None
+BOT_ACTIVITY_TYPE = os.getenv("BOT_ACTIVITY_TYPE", "watching").strip().lower()
+BOT_ACTIVITY_TEXT = os.getenv("BOT_ACTIVITY_TEXT", "Epileptic Community • /help").strip()
 
 # Exact Role Names from your server
 UNVERIFIED_ROLE_NAME = os.getenv("UNVERIFIED_ROLE_NAME", "Not Verified").strip()

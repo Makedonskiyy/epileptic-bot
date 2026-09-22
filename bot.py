@@ -92,8 +92,17 @@ class EpilepticBot(commands.Bot):
         logger.info(f"Gateway Latency: {round(self.latency * 1000, 1)} ms")
         logger.info("==================================================")
 
-        # Clean online status without custom activity text
-        await self.change_presence(status=discord.Status.online, activity=None)
+        # Online presence with community activity
+        activity_type_map = {
+            "playing": discord.ActivityType.playing,
+            "streaming": discord.ActivityType.streaming,
+            "listening": discord.ActivityType.listening,
+            "watching": discord.ActivityType.watching,
+            "competing": discord.ActivityType.competing,
+        }
+        act_type = activity_type_map.get(config.BOT_ACTIVITY_TYPE, discord.ActivityType.watching)
+        activity = discord.Activity(type=act_type, name=config.BOT_ACTIVITY_TEXT) if config.BOT_ACTIVITY_TEXT else None
+        await self.change_presence(status=discord.Status.online, activity=activity)
 
 
 def is_valid_token(token: str) -> bool:

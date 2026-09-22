@@ -274,6 +274,14 @@ async def api_broadcast_post(
             msg = await target_channel.send(content=content_mention, embed=embed, file=discord_file)
         else:
             msg = await target_channel.send(content=content_mention, embed=embed)
+
+        # If posting to an Announcement/News channel, auto-publish to all followers
+        if target_channel.type == discord.ChannelType.news:
+            try:
+                await msg.publish()
+            except Exception:
+                pass
+
         return {"success": True, "message": f"Post successfully published to #{target_channel.name}!"}
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
