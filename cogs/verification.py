@@ -620,6 +620,10 @@ class VerificationCog(commands.Cog, name="Verification"):
                 try:
                     await m.add_roles(unverified_role, reason="Auto-sync: onboarding unverified role")
                     logger.info(f"Auto-assigned Not Verified to {m} ({m.id})")
+                    await asyncio.sleep(0.3)
+                except Exception as e:
+                    logger.warning(f"Auto-sync unverified error for {m}: {e}")
+
         # 3. Enforce thread locks & clean up unauthorized threads in read-only channels
         await self._lock_and_clean_threads(guild, member_role, unverified_role)
 
