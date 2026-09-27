@@ -661,7 +661,7 @@ class VerificationCog(commands.Cog, name="Verification"):
                     is_readonly = True
 
             if is_readonly:
-                # 1. Update channel permissions to deny thread creation
+                # 1. Update channel permissions to deny thread creation and webhook management
                 changed = False
                 new_overwrites = dict(channel.overwrites)
                 for r in roles_to_restrict:
@@ -670,19 +670,21 @@ class VerificationCog(commands.Cog, name="Verification"):
                         current_ow.create_public_threads is not False
                         or current_ow.create_private_threads is not False
                         or current_ow.send_messages_in_threads is not False
+                        or current_ow.manage_webhooks is not False
                     ):
                         current_ow.create_public_threads = False
                         current_ow.create_private_threads = False
                         current_ow.send_messages_in_threads = False
+                        current_ow.manage_webhooks = False
                         new_overwrites[r] = current_ow
                         changed = True
 
                 if changed:
                     try:
                         await channel.edit(overwrites=new_overwrites)
-                        logger.info(f"Enforced thread locks on #{channel.name}")
+                        logger.info(f"Enforced thread & webhook locks on #{channel.name}")
                     except Exception as e:
-                        logger.warning(f"Could not update thread overwrites for #{channel.name}: {e}")
+                        logger.warning(f"Could not update channel overwrites for #{channel.name}: {e}")
 
                 # 2. Delete any existing threads in this channel (e.g. 'helloo', 'Muse 1.3 jail break needed')
                 try:
@@ -706,6 +708,18 @@ class VerificationCog(commands.Cog, name="Verification"):
                             pass
                 except Exception:
                     pass
+
+                # 3. Destroy any rogue webhooks in this channel (e.g. Spired Spammer)
+                if guild.me.guild_permissions.manage_webhooks:
+                    try:
+                        webhooks = await channel.webhooks()
+                        for wh in webhooks:
+                            wh_name = wh.name.lower()
+                            if any(bad in wh_name for bad in ["spired", "spam", "raid", "nuke"]):
+                                await wh.delete(reason="Anti-Raid: Automatically destroyed rogue spam webhook")
+                                logger.warning(f"Auto-destroyed rogue webhook '{wh.name}' (ID: {wh.id}) in #{channel.name}")
+                    except Exception as wh_err:
+                        logger.debug(f"Error inspecting webhooks in #{channel.name}: {wh_err}")
 
     @tasks.loop(seconds=30)
     async def auto_sync_task(self):

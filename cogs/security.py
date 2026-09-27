@@ -3,7 +3,7 @@ import time
 import asyncio
 import logging
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -19,13 +19,15 @@ DISCORD_INVITE_REGEX = re.compile(
 
 
 class SecurityManager:
-    """Менеджер безопасности: защита от рейдов, флуда и спама верификацией."""
+    """Менеджер безопасности: защита от рейдов, флуда, бот-спама и несанкционированных вебхуков."""
 
     def __init__(self):
         # Хранение времени последнего взаимодействия для ограничения скорости (rate limit)
         self.user_cooldowns: dict[int, float] = {}
         # Очередь временных меток входа для обнаружения рейдов (join flood)
         self.recent_joins: deque[float] = deque()
+        # История сообщений для обнаружения флуда и повторов: sender_id -> deque of (timestamp, content)
+        self.message_history: dict[int, deque[tuple[float, str]]] = {}
 
     def check_user_cooldown(self, user_id: int) -> tuple[bool, float]:
         """
@@ -85,6 +87,77 @@ class SecurityManager:
             self.recent_joins.popleft()
 
         return len(self.recent_joins) >= config.ANTI_RAID_JOIN_THRESHOLD
+
+    def register_message_and_check_spam(self, sender_id: int, content: str) -> tuple[bool, str]:
+        """
+        Проверка на флуд и повторение сообщений per sender (user ID или webhook ID):
+        1. Высокая частота: более 3 сообщений за 3.0 секунды
+        2. Повторяющийся спам: 3 одинаковых сообщения за 6 секунд
+        """
+        now = time.time()
+        if sender_id not in self.message_history:
+            self.message_history[sender_id] = deque()
+
+        history = self.message_history[sender_id]
+        history.append((now, content))
+
+        # Оставляем только записи за последние 8 секунд
+        cutoff = now - 8.0
+        while history and history[0][0] < cutoff:
+            history.popleft()
+
+        # Периодическая очистка словаря при большом размере
+        if len(self.message_history) > 3000:
+            threshold = now - 15.0
+            self.message_history = {k: v for k, v in self.message_history.items() if v and v[-1][0] > threshold}
+
+        # 1. Проверка частоты (3+ сообщения за 3.0 сек)
+        recent_3s = [t for t, _ in history if now - t <= 3.0]
+        if len(recent_3s) >= 4:
+            return True, "Fast Message Flooding (>3 msgs / 3s)"
+
+        # 2. Проверка дубликатов (3 одинаковых за 6 сек)
+        if len(content) >= 3:
+            duplicate_count = sum(1 for t, c in history if c == content and (now - t <= 6.0))
+            if duplicate_count >= 3:
+                return True, "Repeated Message Flood"
+
+        return False, ""
+
+    def check_spam_content(self, content: str, embeds: list[discord.Embed]) -> tuple[bool, str]:
+        """
+        Проверка содержимого и эмбедов на известные сигнатуры бот-спамеров, рейд-тулов и вебхук-спама.
+        """
+        embed_parts = []
+        for e in embeds:
+            if e.title:
+                embed_parts.append(e.title)
+            if e.description:
+                embed_parts.append(e.description)
+            for f in e.fields:
+                embed_parts.append(f"{f.name} {f.value}")
+            if e.footer and e.footer.text:
+                embed_parts.append(e.footer.text)
+            if e.author and e.author.name:
+                embed_parts.append(e.author.name)
+
+        full_text = f"{content} {' '.join(embed_parts)}".lower()
+
+        # Сигнатуры известных спамеров и рейд-инструментов
+        spam_signatures = [
+            ("spired", "Spired Spammer signature detected"),
+            ("spammed by", "Rogue bot spam pattern ('spammed by')"),
+            ("raided by", "Raid tool signature ('raided by')"),
+            ("nuked by", "Server nuke signature ('nuked by')"),
+            ("crash discord", "Malicious exploit signature"),
+            ("webhook spam", "Webhook raid signature"),
+        ]
+
+        for pattern, reason in spam_signatures:
+            if pattern in full_text:
+                return True, reason
+
+        return False, ""
 
 
 security_manager = SecurityManager()
@@ -163,7 +236,38 @@ class SecurityCog(commands.Cog, name="Security"):
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         guild = member.guild
-        # Проверка на рейд
+
+        # 1. Anti-Rogue-Bot Shield: Check if an unauthorized bot account joined
+        if member.bot:
+            try:
+                authorized = False
+                inviter = None
+                async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.bot_add):
+                    if entry.target and entry.target.id == member.id:
+                        inviter = entry.user
+                        if inviter and (inviter.id == guild.owner_id or inviter.guild_permissions.administrator):
+                            authorized = True
+                        break
+
+                # If bot was invited by someone who is not owner/admin, ban it immediately
+                if not authorized and inviter and inviter.id != guild.owner_id and not inviter.guild_permissions.administrator:
+                    await member.ban(reason=f"Anti-Raid: Unauthorized bot invited by {inviter} ({inviter.id})")
+                    alert_embed = discord.Embed(
+                        title="🚨 [SECURITY] Rogue Bot Blocked & Banned",
+                        description=(
+                            f"**Rogue Bot:** {member.mention} (`{member.id}`)\n"
+                            f"**Invited By:** {inviter.mention} (`{inviter.id}`)\n"
+                            f"**Action:** Bot was immediately banned from the server."
+                        ),
+                        color=config.EMBED_COLOR_ERROR
+                    )
+                    await send_mod_log(guild, alert_embed)
+                    logger.warning(f"Banned unauthorized bot {member} added by {inviter}.")
+                    return
+            except Exception as e:
+                logger.debug(f"Audit log check error for joining bot: {e}")
+
+        # 2. Check for human user mass join raid
         is_raid = security_manager.register_join_and_check_raid()
         if is_raid:
             alert_embed = discord.Embed(
@@ -182,34 +286,176 @@ class SecurityCog(commands.Cog, name="Security"):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        """Anti-Invite Link Filter: Deletes unauthorized Discord invite links from non-staff."""
-        if not message.guild or message.author.bot:
+        """
+        Anti-Spam & Rogue Bot/Webhook Interceptor:
+        - Intercepts webhook spam (e.g. Spired Spammer) -> deletes message, destroys the webhook, purges channel
+        - Intercepts rogue bot spam -> bans the bot, purges messages
+        - Intercepts member flood / repeated messages -> timeouts member for 1 hour, purges messages
+        - Filters unauthorized invite links
+        """
+        if not message.guild:
             return
 
-        # Разрешено персоналу
-        is_staff_author = (
-            message.author.id == message.guild.owner_id
-            or message.author.guild_permissions.administrator
-            or any(r.name.lower() in config.STAFF_ROLE_NAMES for r in message.author.roles)
-        )
+        # 1. Never filter our own bot
+        if message.author.id == self.bot.user.id:
+            return
+
+        guild = message.guild
+        channel = message.channel
+        is_webhook = message.webhook_id is not None
+        sender_id = message.webhook_id if is_webhook else message.author.id
+
+        # 2. Allow server staff through filter
+        is_staff_author = False
+        if not is_webhook and isinstance(message.author, discord.Member):
+            is_staff_author = (
+                message.author.id == guild.owner_id
+                or message.author.guild_permissions.administrator
+                or any(r.name.lower() in config.STAFF_ROLE_NAMES for r in message.author.roles)
+            )
+
         if is_staff_author:
             return
 
-        # Проверка на наличие ссылок-приглашений Discord
+        # 3. Content Inspection (Spam signatures, Spired Spammer, raid patterns)
+        is_spam_text, spam_reason = security_manager.check_spam_content(message.content, message.embeds)
+
+        # 4. Rate-limit & Repetition Flood Inspection
+        clean_content = message.content.strip().lower()
+        if not clean_content and message.embeds:
+            clean_content = " ".join([e.title or '' for e in message.embeds]).strip().lower()
+        is_flood, flood_reason = security_manager.register_message_and_check_spam(sender_id, clean_content)
+
+        if is_spam_text or is_flood:
+            trigger_reason = spam_reason or flood_reason
+            logger.warning(f"Spam detected from {'Webhook' if is_webhook else 'Sender'} {sender_id} in #{channel.name}: {trigger_reason}")
+
+            # A. Delete offending spam message
+            try:
+                await message.delete()
+            except Exception as d_err:
+                logger.debug(f"Could not delete spam message: {d_err}")
+
+            # B. WEBHOOK SPAM (e.g. Spired Spammer): Destroy the webhook immediately
+            if is_webhook:
+                webhook_name = message.author.name
+                try:
+                    webhooks = await channel.webhooks()
+                    for wh in webhooks:
+                        if wh.id == message.webhook_id:
+                            await wh.delete(reason=f"Epileptic Anti-Spam: Destroyed rogue spam webhook ({trigger_reason})")
+                            logger.info(f"DESTROYED ROGUE WEBHOOK '{wh.name}' (ID: {wh.id}) in #{channel.name}")
+                except Exception as wh_err:
+                    logger.warning(f"Error destroying rogue webhook: {wh_err}")
+
+                # Purge recent spam messages from this webhook in the channel
+                try:
+                    def is_offending_webhook_msg(m: discord.Message) -> bool:
+                        if m.webhook_id == message.webhook_id:
+                            return True
+                        if "spired" in m.content.lower():
+                            return True
+                        for e in m.embeds:
+                            if "spired" in (e.title or "").lower() or "spired" in (e.description or "").lower():
+                                return True
+                        return False
+
+                    deleted = await channel.purge(limit=50, check=is_offending_webhook_msg)
+                    logger.info(f"Purged {len(deleted)} spam messages from webhook in #{channel.name}")
+                except Exception as p_err:
+                    logger.debug(f"Error purging webhook messages: {p_err}")
+
+                # Alert staff in mod-logs
+                alert_embed = discord.Embed(
+                    title="🚨 [SECURITY] Rogue Webhook Spam Destroyed",
+                    description=(
+                        f"**Channel:** {channel.mention}\n"
+                        f"**Webhook:** `{webhook_name}` (ID: `{message.webhook_id}`)\n"
+                        f"**Reason:** `{trigger_reason}`\n"
+                        f"**Action Taken:** Webhook permanently deleted from channel, messages purged."
+                    ),
+                    color=config.EMBED_COLOR_ERROR
+                )
+                await send_mod_log(guild, alert_embed)
+                return
+
+            # C. MEMBER SPAM (Bot account or human user)
+            if isinstance(message.author, discord.Member):
+                member = message.author
+
+                # If an unauthorized BOT account is spamming -> Ban it immediately
+                if member.bot:
+                    try:
+                        await member.ban(
+                            reason=f"Epileptic Anti-Spam: Rogue bot spamming ({trigger_reason})",
+                            delete_message_days=1
+                        )
+                        logger.info(f"BANNED ROGUE BOT {member} ({member.id})")
+                        alert_embed = discord.Embed(
+                            title="🚨 [SECURITY] Rogue Bot Banned",
+                            description=(
+                                f"**Bot:** {member.mention} (`{member.id}`)\n"
+                                f"**Channel:** {channel.mention}\n"
+                                f"**Reason:** `{trigger_reason}`\n"
+                                f"**Action Taken:** Bot permanently banned, recent messages purged."
+                            ),
+                            color=config.EMBED_COLOR_ERROR
+                        )
+                        await send_mod_log(guild, alert_embed)
+                        return
+                    except Exception as b_err:
+                        logger.warning(f"Could not ban rogue bot {member}: {b_err}")
+
+                # If human user -> Timeout for 1 hour
+                try:
+                    await member.timeout(
+                        datetime.now(timezone.utc) + timedelta(hours=1),
+                        reason=f"Epileptic Anti-Spam: {trigger_reason}"
+                    )
+                    logger.info(f"Timed out spammer {member} ({member.id}) for 1 hour.")
+                except Exception as t_err:
+                    logger.debug(f"Could not timeout member: {t_err}")
+
+                # Purge recent messages from this member
+                try:
+                    deleted = await channel.purge(limit=30, check=lambda m: m.author.id == member.id)
+                    logger.info(f"Purged {len(deleted)} messages from spammer {member.id}")
+                except Exception:
+                    pass
+
+                # Temporary warning in chat
+                try:
+                    warn = await channel.send(
+                        f"🛡️ {member.mention} has been muted for spamming ({trigger_reason})."
+                    )
+                    await asyncio.sleep(6)
+                    await warn.delete()
+                except Exception:
+                    pass
+
+                alert_embed = discord.Embed(
+                    title="🛡️ [SECURITY] Spammer Muted & Purged",
+                    description=(
+                        f"**User:** {member.mention} (`{member.id}`)\n"
+                        f"**Channel:** {channel.mention}\n"
+                        f"**Reason:** `{trigger_reason}`\n"
+                        f"**Action Taken:** 1-hour timeout applied, recent messages purged."
+                    ),
+                    color=config.EMBED_COLOR_WARNING
+                )
+                await send_mod_log(guild, alert_embed)
+                return
+
+        # 5. Anti-Invite Link Filter (for non-flood messages)
         match = DISCORD_INVITE_REGEX.search(message.content)
         if match:
             try:
                 await message.delete()
-            except discord.Forbidden:
-                logger.warning(f"Failed to delete invite from {message.author}: missing permissions.")
-                return
-            except Exception as e:
-                logger.error(f"Error deleting invite message: {e}")
-                return
+            except Exception:
+                pass
 
-            # Временное предупреждение в чате с автоудалением
             try:
-                warn_msg = await message.channel.send(
+                warn_msg = await channel.send(
                     f"⚠️ {message.author.mention}, posting Discord invite links is strictly prohibited by server rules!"
                 )
                 await asyncio.sleep(7)
@@ -217,19 +463,18 @@ class SecurityCog(commands.Cog, name="Security"):
             except Exception:
                 pass
 
-            # Логирование в mod-logs
             log_embed = discord.Embed(
                 title="🚫 [ANTI-INVITE] Invite Link Deleted",
                 description=(
                     f"**User:** {message.author.mention} (`{message.author.id}`)\n"
-                    f"**Channel:** {message.channel.mention}\n"
+                    f"**Channel:** {channel.mention}\n"
                     f"**Detected Link:** `{match.group(0)}`\n"
                     f"**Message:** ```{message.content[:500]}```"
                 ),
                 color=config.EMBED_COLOR_ERROR
             )
-            await send_mod_log(message.guild, log_embed)
-            logger.info(f"Deleted unauthorized invite link from {message.author} in #{message.channel.name}")
+            await send_mod_log(guild, log_embed)
+            logger.info(f"Deleted unauthorized invite link from {message.author} in #{channel.name}")
 
     @commands.Cog.listener()
     async def on_thread_create(self, thread: discord.Thread):
