@@ -627,6 +627,9 @@ class VerificationCog(commands.Cog, name="Verification"):
         # 3. Enforce thread locks & clean up unauthorized threads in read-only channels
         await self._lock_and_clean_threads(guild, member_role, unverified_role)
 
+        # 4. Auto-purge any leftover spam messages from raid bots or webhooks (e.g. Spired Spammer)
+        await self._auto_purge_spam_messages(guild)
+
     async def _lock_and_clean_threads(
         self,
         guild: discord.Guild,
@@ -720,6 +723,34 @@ class VerificationCog(commands.Cog, name="Verification"):
                                 logger.warning(f"Auto-destroyed rogue webhook '{wh.name}' (ID: {wh.id}) in #{channel.name}")
                     except Exception as wh_err:
                         logger.debug(f"Error inspecting webhooks in #{channel.name}: {wh_err}")
+
+    async def _auto_purge_spam_messages(self, guild: discord.Guild):
+        """
+        Scans channels and purges any leftover messages from Spired Spammer, rogue webhooks, or raid bots.
+        """
+        if not guild.me.guild_permissions.manage_messages:
+            return
+
+        def is_leftover_spam(m: discord.Message) -> bool:
+            text = m.content.lower()
+            if any(bad in text for bad in ["spired", "spammed by", "raided by", "nuked by"]):
+                return True
+            if m.author.name and any(bad in m.author.name.lower() for bad in ["spired", "spammed"]):
+                return True
+            for e in m.embeds:
+                e_text = f"{e.title or ''} {e.description or ''} {' '.join([f'{f.name} {f.value}' for f in e.fields])}".lower()
+                if any(bad in e_text for bad in ["spired", "spammed by", "raided by", "nuked by"]):
+                    return True
+            return False
+
+        for channel in guild.text_channels:
+            if channel.permissions_for(guild.me).manage_messages:
+                try:
+                    deleted = await channel.purge(limit=100, check=is_leftover_spam, bulk=True)
+                    if deleted:
+                        logger.info(f"Auto-purged {len(deleted)} leftover spam messages in #{channel.name}")
+                except Exception as e:
+                    logger.debug(f"Error auto-purging spam in #{channel.name}: {e}")
 
     @tasks.loop(seconds=30)
     async def auto_sync_task(self):
