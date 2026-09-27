@@ -733,20 +733,24 @@ class VerificationCog(commands.Cog, name="Verification"):
 
         def is_leftover_spam(m: discord.Message) -> bool:
             text = m.content.lower()
-            if any(bad in text for bad in ["spired", "spammed by", "raided by", "nuked by"]):
+            if any(bad in text for bad in ["spired", "spammed by", "raided by", "nuked by", "spammer"]):
                 return True
-            if m.author.name and any(bad in m.author.name.lower() for bad in ["spired", "spammed"]):
+            if m.author.name and any(bad in m.author.name.lower() for bad in ["spired", "spammed", "spammer"]):
                 return True
             for e in m.embeds:
-                e_text = f"{e.title or ''} {e.description or ''} {' '.join([f'{f.name} {f.value}' for f in e.fields])}".lower()
-                if any(bad in e_text for bad in ["spired", "spammed by", "raided by", "nuked by"]):
+                parts = [e.title or '', e.description or '', getattr(e.footer, 'text', '') or '']
+                parts.extend([f"{f.name} {f.value}" for f in e.fields])
+                e_text = " ".join(parts).lower()
+                if any(bad in e_text for bad in ["spired", "spammed by", "raided by", "nuked by", "spammer"]):
                     return True
+            if m.webhook_id is not None and any(bad in text for bad in ["discord.gg", "http", "raid", "spam"]):
+                return True
             return False
 
         for channel in guild.text_channels:
             if channel.permissions_for(guild.me).manage_messages:
                 try:
-                    deleted = await channel.purge(limit=100, check=is_leftover_spam, bulk=True)
+                    deleted = await channel.purge(limit=400, check=is_leftover_spam, bulk=True)
                     if deleted:
                         logger.info(f"Auto-purged {len(deleted)} leftover spam messages in #{channel.name}")
                 except Exception as e:

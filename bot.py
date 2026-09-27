@@ -92,6 +92,15 @@ class EpilepticBot(commands.Bot):
         logger.info(f"Gateway Latency: {round(self.latency * 1000, 1)} ms")
         logger.info("==================================================")
 
+        # Direct guild command synchronization (ensures slash commands update immediately without 1h global delay)
+        for guild in self.guilds:
+            try:
+                self.tree.copy_global_to(guild=guild)
+                synced = await self.tree.sync(guild=guild)
+                logger.info(f"Synchronized {len(synced)} slash commands directly to guild '{guild.name}' ({guild.id}).")
+            except Exception as e:
+                logger.warning(f"Warning: Guild command sync failed for {guild.name} ({guild.id}): {e}")
+
         # Online presence with community activity
         activity_type_map = {
             "playing": discord.ActivityType.playing,

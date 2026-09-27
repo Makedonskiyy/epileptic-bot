@@ -1,4 +1,5 @@
 import logging
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -7,6 +8,53 @@ from cogs.verification import find_role_by_key
 from cogs.security import is_staff, send_mod_log
 
 logger = logging.getLogger("epileptic.moderation")
+
+
+def check_is_staff_msg(ctx: commands.Context) -> bool:
+    """Helper to verify staff permissions for prefix text commands."""
+    if not ctx.guild:
+        return False
+    if ctx.author.id == ctx.guild.owner_id:
+        return True
+    if ctx.author.guild_permissions.administrator:
+        return True
+    user_role_names = [r.name.lower() for r in ctx.author.roles]
+    for staff_role in config.STAFF_ROLE_NAMES:
+        if staff_role in user_role_names:
+            return True
+    for alias in config.ROLE_ALIASES.get("staff", []):
+        if any(alias in r_name for r_name in user_role_names):
+            return True
+    return False
+
+
+def is_spam_message_entry(m: discord.Message, kw_lower: str) -> bool:
+    """Determines whether a message is an unwanted bot/webhook spam message."""
+    # 1. Content check
+    c_lower = m.content.lower()
+    if kw_lower in c_lower or any(k in c_lower for k in ["spired", "spammed by", "raided by", "nuked by", "spammer"]):
+        return True
+
+    # 2. Author check
+    if m.author.name:
+        a_lower = m.author.name.lower()
+        if kw_lower in a_lower or any(k in a_lower for k in ["spired", "spammed", "spammer"]):
+            return True
+
+    # 3. Embed check (Spired bot sends embeds)
+    for e in m.embeds:
+        parts = [e.title or '', e.description or '', getattr(e.footer, 'text', '') or '']
+        parts.extend([f"{f.name} {f.value}" for f in e.fields])
+        e_text = " ".join(parts).lower()
+        if kw_lower in e_text or any(k in e_text for k in ["spired", "spammed by", "raided by", "nuked by", "spammer"]):
+            return True
+
+    # 4. Rogue webhook detection
+    if m.webhook_id is not None:
+        if any(k in c_lower for k in ["discord.gg", "http", "raid", "spam"]):
+            return True
+
+    return False
 
 
 class ModerationCog(commands.Cog, name="Moderation"):
@@ -45,7 +93,7 @@ class ModerationCog(commands.Cog, name="Moderation"):
     )
     @app_commands.describe(
         keyword="Keyword or pattern to search and delete (default: 'spired')",
-        limit="Number of recent messages to scan (default: 300, max 1000)",
+        limit="Number of recent messages to scan (default: 500, max 1000)",
         all_channels="Scan and purge spam across all text channels on the server (default: False)"
     )
     @is_staff()
@@ -53,28 +101,13 @@ class ModerationCog(commands.Cog, name="Moderation"):
         self,
         interaction: discord.Interaction,
         keyword: str = "spired",
-        limit: int = 300,
+        limit: int = 500,
         all_channels: bool = False
     ):
         """Scans recent messages and deletes messages matching spam keywords or containing spam embeds."""
         await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
         kw_lower = keyword.strip().lower()
-
-        def is_spam_msg(m: discord.Message) -> bool:
-            # Check content
-            c_lower = m.content.lower()
-            if kw_lower in c_lower or "spired" in c_lower or "spammed by" in c_lower:
-                return True
-            # Check author name
-            if m.author.name and (kw_lower in m.author.name.lower() or "spired" in m.author.name.lower()):
-                return True
-            # Check embeds
-            for e in m.embeds:
-                e_text = f"{e.title or ''} {e.description or ''} {' '.join([f'{f.name} {f.value}' for f in e.fields])}".lower()
-                if kw_lower in e_text or "spired" in e_text or "spammed by" in e_text:
-                    return True
-            return False
 
         target_channels = guild.text_channels if all_channels else [interaction.channel]
         total_deleted = 0
@@ -83,7 +116,11 @@ class ModerationCog(commands.Cog, name="Moderation"):
         for ch in target_channels:
             if ch.permissions_for(guild.me).manage_messages:
                 try:
-                    deleted = await ch.purge(limit=scan_limit, check=is_spam_msg, bulk=True)
+                    deleted = await ch.purge(
+                        limit=scan_limit,
+                        check=lambda m: is_spam_message_entry(m, kw_lower),
+                        bulk=True
+                    )
                     total_deleted += len(deleted)
                 except Exception as e:
                     logger.warning(f"Error purging in #{ch.name}: {e}")
@@ -106,6 +143,81 @@ class ModerationCog(commands.Cog, name="Moderation"):
                 color=config.EMBED_COLOR_SUCCESS
             )
             await send_mod_log(interaction.guild, audit_embed)
+
+    @commands.command(name="cleanspam", aliases=["clean_spam", "purgespam", "purge_spam", "cleanallspam"])
+    async def cleanspam_cmd(self, ctx: commands.Context, *args):
+        """
+        Fast prefix command fallback to wipe spam and delete collapsed 'blocked messages' bars.
+        Usage:
+          !cleanspam                -> purges spam in current channel (500 msgs)
+          !cleanspam all            -> purges spam across ALL text channels
+          !cleanallspam             -> purges spam across ALL text channels
+          !cleanspam 1000           -> purges up to 1000 msgs in current channel
+          !cleanspam all 1000       -> purges up to 1000 msgs across all channels
+        """
+        if not check_is_staff_msg(ctx):
+            await ctx.send("⛔ **Access Denied:** You do not have staff permissions to execute this command.", delete_after=6)
+            return
+
+        guild = ctx.guild
+        if not guild:
+            return
+
+        kw = "spired"
+        scan_limit = 500
+        all_channels = (ctx.invoked_with == "cleanallspam")
+
+        for arg in args:
+            arg_str = str(arg).strip().lower()
+            if arg_str in ("all", "--all", "-a", "guild"):
+                all_channels = True
+            elif arg_str.isdigit():
+                scan_limit = min(max(int(arg_str), 10), 1000)
+            elif len(arg_str) >= 2:
+                kw = arg_str
+
+        kw_lower = kw.strip().lower()
+        target_channels = guild.text_channels if all_channels else [ctx.channel]
+        location_desc = "ALL channels" if all_channels else f"#{ctx.channel.name}"
+
+        status_msg = await ctx.send(
+            f"🧹 **Purging spam...** Target: `{location_desc}` | Keyword: `{kw}` | Limit: `{scan_limit}`"
+        )
+
+        total_deleted = 0
+        for ch in target_channels:
+            if ch.permissions_for(guild.me).manage_messages:
+                try:
+                    deleted = await ch.purge(
+                        limit=scan_limit,
+                        check=lambda m: is_spam_message_entry(m, kw_lower),
+                        bulk=True
+                    )
+                    total_deleted += len(deleted)
+                except Exception as e:
+                    logger.warning(f"Error executing !cleanspam in #{ch.name}: {e}")
+
+        location_str = "across all channels" if all_channels else f"in {ctx.channel.mention}"
+        await status_msg.edit(
+            content=(
+                f"✅ **Spam Cleanup Finished!**\n"
+                f"• Cleaned **{total_deleted}** spam message(s) {location_str}.\n"
+                f"*(The collapsed 'blocked messages' bars will now be completely gone)*"
+            )
+        )
+
+        if total_deleted > 0:
+            audit_embed = discord.Embed(
+                title="🧹 [SECURITY] Spam Purged via !cleanspam",
+                description=(
+                    f"**Moderator:** {ctx.author.mention} (`{ctx.author.id}`)\n"
+                    f"**Target:** {location_str}\n"
+                    f"**Keyword:** `{kw}`\n"
+                    f"**Messages Deleted:** {total_deleted}"
+                ),
+                color=config.EMBED_COLOR_SUCCESS
+            )
+            await send_mod_log(guild, audit_embed)
 
     @app_commands.command(name="serverinfo", description="Display community member counts and role statistics.")
     async def serverinfo(self, interaction: discord.Interaction):
