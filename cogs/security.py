@@ -28,6 +28,23 @@ class SecurityManager:
         self.recent_joins: deque[float] = deque()
         # История сообщений для обнаружения флуда и повторов: sender_id -> deque of (timestamp, content)
         self.message_history: dict[int, deque[tuple[float, str]]] = {}
+        # Режим изоляции / защиты от рейдов (Raid Lockdown Mode)
+        self.raid_mode: bool = False
+        self.raid_mode_until: float = 0.0
+
+    def is_raid_active(self) -> bool:
+        """Проверяет, активен ли в данный момент защитный режим от рейдов."""
+        now = time.time()
+        if self.raid_mode:
+            if now < self.raid_mode_until:
+                return True
+            self.raid_mode = False
+        return False
+
+    def set_raid_mode(self, enabled: bool, duration_seconds: float = 300.0):
+        """Вручную включает или выключает режим защиты от рейдов."""
+        self.raid_mode = enabled
+        self.raid_mode_until = time.time() + duration_seconds if enabled else 0.0
 
     def check_user_cooldown(self, user_id: int) -> tuple[bool, float]:
         """
@@ -76,7 +93,7 @@ class SecurityManager:
     def register_join_and_check_raid(self) -> bool:
         """
         Регистрирует вход нового участника и проверяет превышение порога рейдов.
-        Возвращает True, если обнаружен рейд.
+        Если обнаружен всплеск входов, активирует Raid Mode на 3 минуты.
         """
         now = time.time()
         self.recent_joins.append(now)
@@ -86,7 +103,13 @@ class SecurityManager:
         while self.recent_joins and self.recent_joins[0] < cutoff:
             self.recent_joins.popleft()
 
-        return len(self.recent_joins) >= config.ANTI_RAID_JOIN_THRESHOLD
+        is_spike = len(self.recent_joins) >= config.ANTI_RAID_JOIN_THRESHOLD
+        if is_spike:
+            self.raid_mode = True
+            self.raid_mode_until = now + 180.0  # 3 минуты режима изоляции
+            return True
+
+        return self.is_raid_active()
 
     def register_message_and_check_spam(self, sender_id: int, content: str) -> tuple[bool, str]:
         """
@@ -270,19 +293,35 @@ class SecurityCog(commands.Cog, name="Security"):
         # 2. Check for human user mass join raid
         is_raid = security_manager.register_join_and_check_raid()
         if is_raid:
+            # Check account age
+            age_seconds = (datetime.now(timezone.utc) - member.created_at).total_seconds()
+            is_suspicious_fresh_alt = age_seconds < 86400 * 3  # Under 3 days old
+
+            action_desc = "Quarantined with Not Verified role (welcome cards suppressed)"
+            if is_suspicious_fresh_alt:
+                try:
+                    await member.timeout(
+                        datetime.now(timezone.utc) + timedelta(hours=24),
+                        reason="Anti-Raid: Fresh account (<3 days) joining during active raid"
+                    )
+                    action_desc = "Timed out for 24h (account created < 3 days ago)"
+                except Exception as t_err:
+                    logger.debug(f"Could not timeout raid member {member}: {t_err}")
+
             alert_embed = discord.Embed(
-                title="🚨 [SECURITY] Potential Server Raid Detected!",
+                title="🚨 [SECURITY] Raid Influx Intercepted!",
                 description=(
-                    f"⚠️ High influx of new accounts detected: **{len(security_manager.recent_joins)} joins** "
-                    f"within **{config.ANTI_RAID_WINDOW_SECONDS}s**!\n\n"
-                    f"Latest account: {member.mention} (`{member.id}`)\n"
-                    f"Account created: <t:{int(member.created_at.timestamp())}:R>"
+                    f"⚠️ **Raid mode is active:** high influx of new accounts detected ({len(security_manager.recent_joins)} joins in {config.ANTI_RAID_WINDOW_SECONDS}s)!\n\n"
+                    f"**Account:** {member.mention} (`{member.id}`)\n"
+                    f"**Created:** <t:{int(member.created_at.timestamp())}:R>\n"
+                    f"**Action Taken:** `{action_desc}`\n"
+                    f"**Notice:** Welcome cards are paused while raid is active."
                 ),
                 color=config.EMBED_COLOR_ERROR
             )
             alert_embed.set_footer(text="Epileptic Anti-Raid Guard")
             await send_mod_log(guild, alert_embed)
-            logger.warning(f"Raid alert triggered on guild {guild.name} ({guild.id})!")
+            logger.warning(f"Raid influx: {member} ({member.id}) handled during raid mode.")
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -345,6 +384,81 @@ class SecurityCog(commands.Cog, name="Security"):
             )
             await send_mod_log(guild, alert_embed)
             logger.info(f"Blocked @everyone/@here mention from {message.author} in #{channel.name}")
+            return
+
+        # 2.6. Anti-Role Mentions for regular users
+        if message.role_mentions:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+
+            try:
+                warn_msg = await channel.send(
+                    f"⚠️ {message.author.mention}, упоминание ролей сервера запрещено правилами!"
+                )
+                await asyncio.sleep(5)
+                await warn_msg.delete()
+            except Exception:
+                pass
+
+            roles_str = ", ".join([f"@{r.name}" for r in message.role_mentions])
+            alert_embed = discord.Embed(
+                title="🛡️ [SECURITY] Blocked Role Mention",
+                description=(
+                    f"**User:** {message.author.mention} (`{message.author.id}`)\n"
+                    f"**Channel:** {channel.mention}\n"
+                    f"**Roles Mentioned:** `{roles_str}`\n"
+                    f"**Content:** ```{message.content[:400]}```\n"
+                    f"**Action Taken:** Message immediately deleted."
+                ),
+                color=config.EMBED_COLOR_WARNING
+            )
+            await send_mod_log(guild, alert_embed)
+            logger.info(f"Blocked role mention ({roles_str}) from {message.author} in #{channel.name}")
+            return
+
+        # 2.7. Anti-Mass User Mentions (Max 3 user mentions allowed for regular users)
+        if len(message.mentions) >= 4:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+
+            try:
+                warn_msg = await channel.send(
+                    f"⚠️ {message.author.mention}, массовые упоминания участников (более 3) запрещены правилами!"
+                )
+                await asyncio.sleep(5)
+                await warn_msg.delete()
+            except Exception:
+                pass
+
+            timeout_applied = False
+            if len(message.mentions) >= 6 and isinstance(message.author, discord.Member):
+                try:
+                    await message.author.timeout(
+                        datetime.now(timezone.utc) + timedelta(minutes=15),
+                        reason=f"Epileptic Anti-Spam: Mass user mentions ({len(message.mentions)} mentions)"
+                    )
+                    timeout_applied = True
+                except Exception as t_err:
+                    logger.debug(f"Could not timeout member: {t_err}")
+
+            action_desc = "Message deleted, 15m timeout applied" if timeout_applied else "Message deleted"
+            alert_embed = discord.Embed(
+                title="🛡️ [SECURITY] Mass User Mentions Blocked",
+                description=(
+                    f"**User:** {message.author.mention} (`{message.author.id}`)\n"
+                    f"**Channel:** {channel.mention}\n"
+                    f"**Mentions Count:** `{len(message.mentions)}`\n"
+                    f"**Content:** ```{message.content[:400]}```\n"
+                    f"**Action Taken:** {action_desc}"
+                ),
+                color=config.EMBED_COLOR_WARNING
+            )
+            await send_mod_log(guild, alert_embed)
+            logger.info(f"Blocked mass mentions ({len(message.mentions)}) from {message.author} in #{channel.name}")
             return
 
         # 3. Content Inspection (Spam signatures, Spired Spammer, raid patterns)
@@ -576,6 +690,91 @@ class SecurityCog(commands.Cog, name="Security"):
                     )
                 except Exception:
                     pass
+
+    @app_commands.command(
+        name="lockdown",
+        description="Toggle or check anti-raid lockdown mode (suppresses join spam and isolates fresh alts)."
+    )
+    @app_commands.describe(
+        action="Action to perform: status, enable, or disable",
+        minutes="Lockdown duration in minutes if enabling (default: 10)"
+    )
+    @is_staff()
+    async def lockdown(
+        self,
+        interaction: discord.Interaction,
+        action: str = "status",
+        minutes: int = 10
+    ):
+        act_lower = action.strip().lower()
+        now = time.time()
+
+        if act_lower in ("enable", "on", "start"):
+            duration = max(minutes, 1) * 60
+            security_manager.set_raid_mode(True, duration_seconds=duration)
+            embed = discord.Embed(
+                title="🛡️ [SECURITY] Raid Lockdown ENABLED",
+                description=(
+                    f"⚠️ **Raid mode is now ACTIVE for {minutes} minutes.**\n\n"
+                    f"• Visual welcome cards are **paused**.\n"
+                    f"• Accounts created < 3 days ago will be automatically timed out on join.\n"
+                    f"• Instant self-verification is temporarily restricted."
+                ),
+                color=config.EMBED_COLOR_ERROR
+            )
+            await interaction.response.send_message(embed=embed)
+            await send_mod_log(interaction.guild, embed)
+
+        elif act_lower in ("disable", "off", "stop"):
+            security_manager.set_raid_mode(False)
+            embed = discord.Embed(
+                title="✅ [SECURITY] Raid Lockdown DISABLED",
+                description="Normal server operations and welcome messages have been restored.",
+                color=config.EMBED_COLOR_SUCCESS
+            )
+            await interaction.response.send_message(embed=embed)
+            await send_mod_log(interaction.guild, embed)
+
+        else:
+            is_active = security_manager.is_raid_active()
+            remaining_mins = round((security_manager.raid_mode_until - now) / 60, 1) if is_active else 0
+            embed = discord.Embed(
+                title="🛡️ Server Security & Raid Status",
+                description=(
+                    f"• **Raid Mode Active:** `{'YES 🚨' if is_active else 'NO ✅'}`\n"
+                    f"• **Remaining Duration:** `{remaining_mins} min`\n"
+                    f"• **Recent Join Influx:** `{len(security_manager.recent_joins)} account(s)` in `{config.ANTI_RAID_WINDOW_SECONDS}s`\n"
+                    f"• **Raid Trigger Threshold:** `{config.ANTI_RAID_JOIN_THRESHOLD} joins`"
+                ),
+                color=config.EMBED_COLOR_DEFAULT
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @commands.command(name="lockdown")
+    async def lockdown_cmd(self, ctx: commands.Context, action: str = "status", minutes: int = 10):
+        """Prefix command fallback for /lockdown: !lockdown [status|enable|disable] [minutes]"""
+        user_is_staff = (
+            ctx.author.id == ctx.guild.owner_id
+            or ctx.author.guild_permissions.administrator
+            or any(r.name.lower() in config.STAFF_ROLE_NAMES for r in ctx.author.roles)
+        )
+        if not user_is_staff:
+            await ctx.send("⛔ You do not have permission to execute this command.", delete_after=5)
+            return
+
+        act_lower = action.strip().lower()
+        now = time.time()
+
+        if act_lower in ("enable", "on", "start"):
+            duration = max(minutes, 1) * 60
+            security_manager.set_raid_mode(True, duration_seconds=duration)
+            await ctx.send(f"🛡️ **Raid Lockdown ENABLED for {minutes} min.** Welcome cards paused, new alts quarantined.")
+        elif act_lower in ("disable", "off", "stop"):
+            security_manager.set_raid_mode(False)
+            await ctx.send("✅ **Raid Lockdown DISABLED.** Normal operations restored.")
+        else:
+            is_active = security_manager.is_raid_active()
+            await ctx.send(f"🛡️ **Raid Status:** `{'ACTIVE 🚨' if is_active else 'INACTIVE ✅'}` (Recent joins: {len(security_manager.recent_joins)})")
 
 
 async def setup(bot: commands.Bot):

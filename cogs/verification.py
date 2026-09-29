@@ -302,7 +302,11 @@ class VerificationCog(commands.Cog, name="Verification"):
             except Exception as e:
                 logger.exception(f"Error assigning unverified role to {member}: {e}")
 
-        # 2. Post visual welcome banner card to welcome channel
+        # 2. Post visual welcome banner card to welcome channel (suppressed if raid mode active)
+        if security_manager.is_raid_active():
+            logger.warning(f"Raid mode active: skipping visual welcome card for {member} ({member.id})")
+            return
+
         welcome_channel = discord.utils.find(
             lambda c: any(kw in c.name.lower() for kw in ["welcome", "приветств"]),
             guild.text_channels
@@ -594,6 +598,22 @@ class VerificationCog(commands.Cog, name="Verification"):
                     logger.info(f"Auto-disabled mention_everyone on role @{r.name} for {guild.name}")
                 except Exception as r_err:
                     logger.debug(f"Could not update role @{r.name} permissions: {r_err}")
+
+        # Ensure mentionable=False on all non-staff roles (prevents @Member role pings)
+        for r in guild.roles:
+            if r.is_default() or r.managed:
+                continue
+            r_name_lower = r.name.lower()
+            is_staff_role = (
+                r.permissions.administrator
+                or any(s in r_name_lower for s in config.STAFF_ROLE_NAMES)
+            )
+            if not is_staff_role and r.mentionable and guild.me.top_role.position > r.position:
+                try:
+                    await r.edit(mentionable=False, reason="Epileptic Guard: Disable role mentionable for regular members")
+                    logger.info(f"Auto-disabled mentionable on role @{r.name} in {guild.name}")
+                except Exception as m_err:
+                    logger.debug(f"Could not disable mentionable for @{r.name}: {m_err}")
 
         # 1. Auto-verify all members who reacted with ✅ in rules channel
         rules_channel = discord.utils.find(
