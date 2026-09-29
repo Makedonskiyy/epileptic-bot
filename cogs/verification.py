@@ -575,6 +575,26 @@ class VerificationCog(commands.Cog, name="Verification"):
             except Exception:
                 pass
 
+        # Ensure mention_everyone=False for @everyone and non-staff roles
+        try:
+            if guild.default_role.permissions.mention_everyone:
+                default_perms = guild.default_role.permissions
+                default_perms.update(mention_everyone=False)
+                await guild.default_role.edit(permissions=default_perms, reason="Epileptic Guard: Disable @everyone for regular users")
+                logger.info(f"Auto-disabled mention_everyone on @everyone for {guild.name}")
+        except Exception as perm_err:
+            logger.debug(f"Could not update @everyone permissions: {perm_err}")
+
+        for r in [unverified_role, member_role]:
+            if r and r.permissions.mention_everyone:
+                try:
+                    r_perms = r.permissions
+                    r_perms.update(mention_everyone=False)
+                    await r.edit(permissions=r_perms, reason="Epileptic Guard: Disable @everyone for regular roles")
+                    logger.info(f"Auto-disabled mention_everyone on role @{r.name} for {guild.name}")
+                except Exception as r_err:
+                    logger.debug(f"Could not update role @{r.name} permissions: {r_err}")
+
         # 1. Auto-verify all members who reacted with ✅ in rules channel
         rules_channel = discord.utils.find(
             lambda c: any(kw in c.name.lower() for kw in ["rules", "правил"]),

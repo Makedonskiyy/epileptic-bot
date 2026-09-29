@@ -56,6 +56,24 @@ class SetupServerCog(commands.Cog, name="Server Setup"):
         updated_categories = []
         general_members = [r for r in [member_role, premium_role, ai_contrib_role] if r]
 
+        # Enforce mention_everyone=False on @everyone and member roles
+        try:
+            if guild.default_role.permissions.mention_everyone:
+                d_perms = guild.default_role.permissions
+                d_perms.update(mention_everyone=False)
+                await guild.default_role.edit(permissions=d_perms, reason="Setup: Disable @everyone for regular users")
+        except Exception:
+            pass
+
+        for gr in general_members:
+            if gr and gr.permissions.mention_everyone:
+                try:
+                    gr_perms = gr.permissions
+                    gr_perms.update(mention_everyone=False)
+                    await gr.edit(permissions=gr_perms, reason="Setup: Disable @everyone for regular roles")
+                except Exception:
+                    pass
+
         for category in guild.categories:
             cat_name = category.name.strip().upper()
 
@@ -235,7 +253,8 @@ class SetupServerCog(commands.Cog, name="Server Setup"):
                         attach_files=True,
                         embed_links=True,
                         connect=True,
-                        speak=True
+                        speak=True,
+                        mention_everyone=False
                     )
 
                 for s in staff_roles:

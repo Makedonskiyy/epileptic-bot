@@ -317,6 +317,36 @@ class SecurityCog(commands.Cog, name="Security"):
         if is_staff_author:
             return
 
+        # 2.5. Anti-@everyone & Anti-@here filter for regular (non-staff) users
+        if message.mention_everyone or "@everyone" in message.content.lower() or "@here" in message.content.lower():
+            try:
+                await message.delete()
+            except Exception:
+                pass
+
+            try:
+                warn_msg = await channel.send(
+                    f"⚠️ {message.author.mention}, упоминание `@everyone` и `@here` запрещено правилами сервера!"
+                )
+                await asyncio.sleep(5)
+                await warn_msg.delete()
+            except Exception:
+                pass
+
+            alert_embed = discord.Embed(
+                title="🛡️ [SECURITY] Blocked @everyone / @here Mention",
+                description=(
+                    f"**User:** {message.author.mention} (`{message.author.id}`)\n"
+                    f"**Channel:** {channel.mention}\n"
+                    f"**Content:** ```{message.content[:400]}```\n"
+                    f"**Action Taken:** Message immediately deleted."
+                ),
+                color=config.EMBED_COLOR_WARNING
+            )
+            await send_mod_log(guild, alert_embed)
+            logger.info(f"Blocked @everyone/@here mention from {message.author} in #{channel.name}")
+            return
+
         # 3. Content Inspection (Spam signatures, Spired Spammer, raid patterns)
         is_spam_text, spam_reason = security_manager.check_spam_content(message.content, message.embeds)
 

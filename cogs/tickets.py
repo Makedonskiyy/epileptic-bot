@@ -11,21 +11,13 @@ logger = logging.getLogger("epileptic.tickets")
 
 
 async def execute_ticket_close(channel: discord.TextChannel, closed_by: discord.User | discord.Member, client: discord.Client):
-    """Generates transcript, notifies user & mod-logs, and cleanly removes the ticket channel."""
+    """Generates a single .txt transcript, delivers to mod-logs, and deletes the ticket channel."""
     guild = channel.guild
 
-    # 1. Notify that transcript generation is in progress
-    notify_embed = discord.Embed(
-        title="🔒 Archiving Ticket...",
-        description="Generating official transcript and closing ticket...",
-        color=config.EMBED_COLOR_WARNING
-    )
-    await channel.send(embed=notify_embed)
-
-    # 2. Fetch conversation history
+    # 1. Fetch conversation history
     messages = [msg async for msg in channel.history(limit=1000, oldest_first=True)]
 
-    # 3. Detect ticket owner from channel topic
+    # 2. Detect ticket owner from channel topic
     owner = None
     owner_id = None
     topic = channel.topic or ""
@@ -39,64 +31,59 @@ async def execute_ticket_close(channel: discord.TextChannel, closed_by: discord.
         except Exception:
             pass
 
-    # 4. Generate HTML and TXT transcripts
-    html_buf, txt_buf = generate_ticket_transcripts(guild, channel, messages, closed_by, owner)
-    filename_base = f"transcript-{channel.name}"
+    # 3. Generate plain text transcript only (.txt)
+    _, txt_buf = generate_ticket_transcripts(guild, channel, messages, closed_by, owner)
+    filename_txt = f"transcript-{channel.name}.txt"
+    txt_file = discord.File(fp=txt_buf, filename=filename_txt)
 
-    html_file = discord.File(fp=html_buf, filename=f"{filename_base}.html")
-    txt_file = discord.File(fp=txt_buf, filename=f"{filename_base}.txt")
-
-    # 5. Send Transcript to mod-logs channel
+    # 4. Send Transcript to mod-logs channel (Single compact message with .txt file)
     log_embed = discord.Embed(
-        title="🎫 [TRANSCRIPT] Support Ticket Closed",
+        title="🎫 Support Ticket Closed",
         description=(
             f"**Channel:** `#{channel.name}`\n"
             f"**Ticket Creator:** {owner.mention if owner else 'Unknown'} (`{owner_id or 'N/A'}`)\n"
             f"**Closed By:** {closed_by.mention} (`{closed_by.id}`)\n"
-            f"**Total Messages:** `{len(messages)}`\n"
-            f"**Topic / Info:** {topic or 'N/A'}\n\n"
-            f"📎 *HTML and TXT transcript files attached below.*"
+            f"**Total Messages:** `{len(messages)}`"
         ),
         color=config.EMBED_COLOR_DEFAULT
     )
+    log_embed.set_footer(text="Transcript attached (.txt)")
+
     log_channel = discord.utils.find(
         lambda c: any(kw in c.name.lower() for kw in ["mod-logs", "mod_logs", "logs", "audit", "transcripts"]),
         guild.text_channels
     )
     if log_channel:
         try:
-            await log_channel.send(embed=log_embed, files=[html_file, txt_file])
-            logger.info(f"Delivered ticket transcript for #{channel.name} to #{log_channel.name}.")
+            await log_channel.send(embed=log_embed, file=txt_file)
+            logger.info(f"Delivered ticket transcript (.txt) for #{channel.name} to #{log_channel.name}.")
         except Exception as e:
             logger.warning(f"Could not send ticket transcript to mod-logs: {e}")
 
-    # 6. Send Transcript copy to Ticket Creator in DM
+    # 5. Send single .txt transcript to Ticket Creator in DM if open
     if owner:
         try:
-            html_buf.seek(0)
             txt_buf.seek(0)
-            dm_html_file = discord.File(fp=html_buf, filename=f"{filename_base}.html")
-            dm_txt_file = discord.File(fp=txt_buf, filename=f"{filename_base}.txt")
-
+            dm_txt_file = discord.File(fp=txt_buf, filename=filename_txt)
             dm_embed = discord.Embed(
                 title="🎫 Your Support Ticket has been Closed",
                 description=(
                     f"Hello **{owner.display_name}**,\n\n"
                     f"Your support ticket **#{channel.name}** on **{guild.name}** has been closed by {closed_by.mention}.\n\n"
-                    f"A complete archive of the conversation is attached below for your records."
+                    f"A transcript (.txt) of the ticket is attached below."
                 ),
                 color=config.RULES_EMBED_COLOR
             )
             if guild.icon:
                 dm_embed.set_thumbnail(url=guild.icon.url)
             dm_embed.set_footer(text="Epileptic Community Support Desk")
-            await owner.send(embed=dm_embed, files=[dm_html_file, dm_txt_file])
+            await owner.send(embed=dm_embed, file=dm_txt_file)
             logger.info(f"Delivered ticket transcript DM to {owner}.")
         except Exception:
             logger.info(f"Could not send ticket transcript DM to {owner} (DMs closed).")
 
-    # 7. Channel deletion
-    await asyncio.sleep(3)
+    # 6. Clean channel deletion
+    await asyncio.sleep(1)
     try:
         await channel.delete(reason=f"Ticket closed by {closed_by} (transcript saved)")
     except Exception as e:
@@ -246,18 +233,6 @@ class TicketLaunchView(discord.ui.View):
                 embed=welcome_embed,
                 view=control_view
             )
-
-            # Аудит в mod-logs
-            log_embed = discord.Embed(
-                title="🎫 [AUDIT] Support Ticket Opened",
-                description=(
-                    f"**User:** {user.mention} (`{user.id}`)\n"
-                    f"**Channel:** {ticket_channel.mention}\n"
-                    f"**Category:** {support_category.name if support_category else 'None'}"
-                ),
-                color=config.EMBED_COLOR_SUCCESS
-            )
-            await send_mod_log(guild, log_embed)
 
             await interaction.followup.send(
                 f"✅ Your ticket has been created: {ticket_channel.mention}",
