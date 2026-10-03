@@ -105,6 +105,7 @@ SERVER_STRUCTURE = {
         "channels": [
             {"name": "💬・general", "type": "text"},
             {"name": "💬・general-ru", "type": "text"},
+            {"name": "🔓・jailbreak-open", "type": "text"},
             {"name": "😂・off-topic", "type": "text"},
             {"name": "💡・ideas-feedback", "type": "text"}
         ]

@@ -766,33 +766,58 @@ class VerificationCog(commands.Cog, name="Verification"):
 
     async def _auto_purge_spam_messages(self, guild: discord.Guild):
         """
-        Scans channels and purges any leftover messages from Spired Spammer, rogue webhooks, or raid bots.
+        Scans channels and purges any leftover messages from banned users, rogue webhooks, or raid bots.
         """
-        if not guild.me.guild_permissions.manage_messages:
+        if not guild or not guild.me.guild_permissions.manage_messages:
             return
 
+        # Fetch banned user IDs
+        banned_user_ids = set()
+        if guild.me.guild_permissions.ban_members:
+            try:
+                async for entry in guild.bans(limit=1000):
+                    banned_user_ids.add(entry.user.id)
+            except Exception as b_err:
+                logger.debug(f"Could not fetch guild bans for auto purge: {b_err}")
+
         def is_leftover_spam(m: discord.Message) -> bool:
+            # 1. Author was banned from server (cleans up blocked messages from banned spammers)
+            if m.author.id in banned_user_ids:
+                return True
+
+            # 2. Rogue webhook message (not bot)
+            if m.webhook_id is not None:
+                return True
+
+            # 3. Rogue unauthorized bot (not our bot)
+            if m.author.bot and m.author.id != self.bot.user.id:
+                mem = guild.get_member(m.author.id)
+                if not mem or not (mem.guild_permissions.administrator or mem.id == guild.owner_id):
+                    return True
+
+            # 4. Text signatures of known spam / raids / nukes
             text = m.content.lower()
-            if any(bad in text for bad in ["spired", "spammed by", "raided by", "nuked by", "spammer"]):
+            if any(bad in text for bad in ["spired", "spammed by", "raided by", "nuked by", "spammer", "webhook spam"]):
                 return True
             if m.author.name and any(bad in m.author.name.lower() for bad in ["spired", "spammed", "spammer"]):
                 return True
+
+            # 5. Embed contents
             for e in m.embeds:
                 parts = [e.title or '', e.description or '', getattr(e.footer, 'text', '') or '']
                 parts.extend([f"{f.name} {f.value}" for f in e.fields])
                 e_text = " ".join(parts).lower()
-                if any(bad in e_text for bad in ["spired", "spammed by", "raided by", "nuked by", "spammer"]):
+                if any(bad in e_text for bad in ["spired", "spammed by", "raided by", "nuked by", "spammer", "webhook spam"]):
                     return True
-            if m.webhook_id is not None and any(bad in text for bad in ["discord.gg", "http", "raid", "spam"]):
-                return True
+
             return False
 
         for channel in guild.text_channels:
             if channel.permissions_for(guild.me).manage_messages:
                 try:
-                    deleted = await channel.purge(limit=400, check=is_leftover_spam, bulk=True)
+                    deleted = await channel.purge(limit=500, check=is_leftover_spam, bulk=True)
                     if deleted:
-                        logger.info(f"Auto-purged {len(deleted)} leftover spam messages in #{channel.name}")
+                        logger.info(f"Auto-purged {len(deleted)} leftover/blocked spam messages in #{channel.name}")
                 except Exception as e:
                     logger.debug(f"Error auto-purging spam in #{channel.name}: {e}")
 

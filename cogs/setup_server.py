@@ -431,6 +431,156 @@ class SetupServerCog(commands.Cog, name="Server Setup"):
             except Exception as e:
                 logger.warning(f"Could not auto-publish announcement: {e}")
 
+    @commands.Cog.listener()
+    async def on_ready(self):
+        """Auto-ensures necessary community discussion channels like #jailbreak-open exist."""
+        for guild in self.bot.guilds:
+            try:
+                await ensure_jailbreak_open_channel(guild)
+            except Exception as e:
+                logger.debug(f"Auto-check jailbreak channel error on {guild.name}: {e}")
+
+    @app_commands.command(
+        name="create_jailbreak_chat",
+        description="Creates #🔓・jailbreak-open in the COMMUNITY category with full member write access."
+    )
+    @is_owner()
+    async def create_jailbreak_chat(self, interaction: discord.Interaction):
+        """Creates or verifies #🔓・jailbreak-open in COMMUNITY category."""
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        ch = await ensure_jailbreak_open_channel(guild)
+        if ch:
+            await interaction.followup.send(
+                f"✅ Open discussion channel ready: {ch.mention}\n"
+                f"• **Category:** `{ch.category.name if ch.category else 'None'}`\n"
+                f"• **Permissions:** All verified members (`@Member`) can write, embed links, and attach files.",
+                ephemeral=True
+            )
+        else:
+            await interaction.followup.send("❌ Could not create channel. Check bot permissions.", ephemeral=True)
+
+    @commands.command(name="jailbreak_open", aliases=["createjailbreak", "jailbreakopen"])
+    async def jailbreak_open_cmd(self, ctx: commands.Context):
+        """Prefix command fallback: !jailbreak_open"""
+        user_is_staff = (
+            ctx.author.id == ctx.guild.owner_id
+            or ctx.author.guild_permissions.administrator
+            or any(r.name.lower() in config.STAFF_ROLE_NAMES for r in ctx.author.roles)
+        )
+        if not user_is_staff:
+            await ctx.send("⛔ You do not have permission to execute this command.", delete_after=5)
+            return
+
+        ch = await ensure_jailbreak_open_channel(ctx.guild)
+        if ch:
+            await ctx.send(f"✅ Open community channel ready: {ch.mention} (Category: `{ch.category.name if ch.category else 'None'}`)")
+        else:
+            await ctx.send("❌ Failed to create channel. Check bot permissions.")
+
+
+async def ensure_jailbreak_open_channel(guild: discord.Guild) -> discord.TextChannel | None:
+    """
+    Checks if #🔓・jailbreak-open exists in COMMUNITY category.
+    If missing, creates it with optimized permissions (all @Members can write) and an intro guide.
+    """
+    if not guild or not guild.me.guild_permissions.manage_channels:
+        return None
+
+    # Check if channel already exists
+    existing = discord.utils.find(
+        lambda c: "jailbreak-open" in c.name.lower() or "jailbreak_open" in c.name.lower(),
+        guild.text_channels
+    )
+    if existing:
+        return existing
+
+    # Find COMMUNITY category
+    comm_category = discord.utils.find(
+        lambda c: any(kw in c.name.upper() for kw in ["COMMUNITY", "КОМЬЮНИТИ"]),
+        guild.categories
+    )
+
+    not_verified_role = find_role_by_key(guild, "unverified", config.UNVERIFIED_ROLE_NAME)
+    member_role = find_role_by_key(guild, "member", config.MEMBER_ROLE_NAME)
+    premium_role = find_role_by_key(guild, "premium", config.PREMIUM_ROLE_NAME)
+    ai_contrib_role = discord.utils.find(lambda r: r.name.lower() == config.AI_CONTRIBUTOR_ROLE_NAME.lower(), guild.roles)
+
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+    }
+    if not_verified_role:
+        overwrites[not_verified_role] = discord.PermissionOverwrite(view_channel=False)
+
+    general_members = [r for r in [member_role, premium_role, ai_contrib_role] if r]
+    for r in general_members:
+        overwrites[r] = discord.PermissionOverwrite(
+            view_channel=True,
+            send_messages=True,
+            read_messages=True,
+            read_message_history=True,
+            attach_files=True,
+            embed_links=True,
+            connect=True,
+            speak=True,
+            mention_everyone=False
+        )
+
+    for role in guild.roles:
+        r_name = role.name.lower()
+        if (
+            r_name in config.STAFF_ROLE_NAMES
+            or any(alias in r_name for alias in config.ROLE_ALIASES.get("staff", []))
+            or role.permissions.administrator
+        ):
+            overwrites[role] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                manage_messages=True,
+                read_message_history=True,
+                attach_files=True,
+                embed_links=True
+            )
+
+    try:
+        channel = await guild.create_text_channel(
+            name="🔓・jailbreak-open",
+            category=comm_category,
+            overwrites=overwrites,
+            topic="🔓 Open community jailbreak discussion, prompt testing, and AI research hub. Be respectful!",
+            slowmode_delay=3,
+            reason="Epileptic Bot: Creating #jailbreak-open community discussion channel"
+        )
+        logger.info(f"Created #🔓・jailbreak-open in {guild.name} (Category: {comm_category.name if comm_category else 'None'})")
+
+        # Send introductory pinned guide embed
+        intro_embed = discord.Embed(
+            title="🔓 Welcome to #jailbreak-open!",
+            description=(
+                "**Welcome to the open community jailbreak & prompt experimentation hub!**\n\n"
+                "💬 **Everyone with the `@Member` role can write, share prompts, and collaborate here.**\n\n"
+                "**Channel Guidelines:**\n"
+                "• 🧪 Share and discuss new prompt techniques, jailbreak experiments, and LLM safety research.\n"
+                "• 💡 Post snippets, test outputs, and collaborate with other prompt engineers.\n"
+                "• ⚠️ Keep it clean: no text flooding, no self-promo, and no toxic attacks.\n"
+                "• 🧵 For large prompt datasets or long test logs, feel free to create a thread!\n"
+            ),
+            color=config.RULES_EMBED_COLOR
+        )
+        if guild.icon:
+            intro_embed.set_thumbnail(url=guild.icon.url)
+        intro_embed.set_footer(text="Epileptic Community • #jailbreak-open")
+        msg = await channel.send(embed=intro_embed)
+        try:
+            await msg.pin(reason="Channel introduction guide")
+        except Exception:
+            pass
+
+        return channel
+    except Exception as e:
+        logger.error(f"Failed to create #jailbreak-open channel in {guild.name}: {e}")
+        return None
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(SetupServerCog(bot))
