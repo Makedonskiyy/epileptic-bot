@@ -624,7 +624,14 @@ class SecurityCog(commands.Cog, name="Security"):
     async def on_thread_create(self, thread: discord.Thread):
         """Prevents thread creation in read-only / closed information channels."""
         parent = thread.parent
-        if not parent or not isinstance(parent, discord.TextChannel):
+        if not parent:
+            return
+
+        # Never block or delete posts in native Forum channels
+        if isinstance(parent, discord.ForumChannel):
+            return
+
+        if not isinstance(parent, discord.TextChannel):
             return
 
         guild = thread.guild
@@ -646,20 +653,32 @@ class SecurityCog(commands.Cog, name="Security"):
         if is_staff_creator:
             return
 
+        p_name = parent.name.lower()
+        # Allowed discussion keywords - threads are explicitly welcomed here (jailbreak, tutorials, chat, etc.)
+        allowed_keywords = [
+            "jailbreak", "tutorial", "guide", "open", "chat", "general",
+            "bot", "tool", "idea", "code", "prompt", "showcase", "discussion",
+            "media", "meme", "вопрос", "гайды"
+        ]
+        if any(kw in p_name for kw in allowed_keywords):
+            return
+
+        # Allowed categories where threads and discussions are permitted
+        if parent.category and any(kw in parent.category.name.upper() for kw in [
+            "COMMUNITY", "КОМЬЮНИТИ", "RESOURCES", "РЕСУРСЫ", "LOUNGE", "ЛАУНЖ"
+        ]):
+            return
+
+        # Explicit read-only channels where thread spam is blocked
         read_only_keywords = [
             "rules", "правил", "announc", "объявлен", "welcome", "приветств",
-            "access", "доступ", "faq", "инфо", "info"
+            "access", "доступ", "faq", "инфо", "info", "verify", "верифик"
         ]
-        p_name = parent.name.lower()
         is_locked_channel = any(kw in p_name for kw in read_only_keywords)
 
         if not is_locked_channel:
             if parent.category and any(kw in parent.category.name.upper() for kw in ["INFO", "ИНФО"]):
                 is_locked_channel = True
-            else:
-                ow = parent.overwrites_for(guild.default_role)
-                if ow.send_messages is False:
-                    is_locked_channel = True
 
         if is_locked_channel:
             thread_name = thread.name

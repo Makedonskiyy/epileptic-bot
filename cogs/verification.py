@@ -677,7 +677,8 @@ class VerificationCog(commands.Cog, name="Verification"):
         unverified_role: discord.Role | None
     ):
         """
-        Disables thread creation across all read-only channels and deletes any existing threads.
+        Ensures thread/topic creation permissions are enabled for @Member in discussion & forum channels
+        (e.g. #jailbreak, #tutorials), while disabling them in strictly read-only channels.
         """
         if not guild.me.guild_permissions.manage_channels:
             return
@@ -690,18 +691,79 @@ class VerificationCog(commands.Cog, name="Verification"):
 
         read_only_keywords = [
             "rules", "правил", "announc", "объявлен", "welcome", "приветств",
-            "access", "доступ", "faq", "инфо", "info"
+            "access", "доступ", "faq", "инфо", "info", "verify", "верифик"
         ]
 
+        allowed_discussion_keywords = [
+            "jailbreak", "tutorial", "guide", "open", "chat", "general",
+            "bot", "tool", "idea", "code", "prompt", "showcase", "discussion",
+            "media", "meme", "вопрос", "гайды"
+        ]
+
+        # 1. Check and maintain native Forum channels (e.g. Tutorials forum)
+        if hasattr(guild, "forums"):
+            for forum in guild.forums:
+                if member_role:
+                    current_ow = forum.overwrites.get(member_role, discord.PermissionOverwrite())
+                    if (
+                        current_ow.create_public_threads is not True
+                        or current_ow.send_messages is not True
+                        or current_ow.send_messages_in_threads is not True
+                    ):
+                        new_ow = dict(forum.overwrites)
+                        updated_m = discord.PermissionOverwrite(
+                            view_channel=True,
+                            send_messages=True,
+                            send_messages_in_threads=True,
+                            create_public_threads=True,
+                            read_message_history=True,
+                            attach_files=True,
+                            embed_links=True,
+                            add_reactions=True,
+                            manage_webhooks=False
+                        )
+                        new_ow[member_role] = updated_m
+                        try:
+                            await forum.edit(overwrites=new_ow)
+                            logger.info(f"Verified member forum post permissions on forum #{forum.name}")
+                        except Exception as fe:
+                            logger.debug(f"Could not update forum overwrites for #{forum.name}: {fe}")
+
+        # 2. Check and maintain Text channels
         for channel in guild.text_channels:
             p_name = channel.name.lower()
             is_info_cat = channel.category and any(kw in channel.category.name.upper() for kw in ["INFO", "ИНФО"])
-            is_readonly = is_info_cat or any(kw in p_name for kw in read_only_keywords)
 
-            if not is_readonly:
-                ow = channel.overwrites_for(guild.default_role)
-                if ow.send_messages is False:
-                    is_readonly = True
+            # Check if this is an explicitly permitted discussion/community channel
+            is_discussion = any(kw in p_name for kw in allowed_discussion_keywords) or (
+                channel.category and any(kw in channel.category.name.upper() for kw in [
+                    "COMMUNITY", "КОМЬЮНИТИ", "RESOURCES", "РЕСУРСЫ", "LOUNGE", "ЛАУНЖ"
+                ])
+            )
+
+            if is_discussion and not is_info_cat and not any(kw in p_name for kw in ["rules", "правил", "announc", "объявлен"]):
+                # Ensure @Member has thread creation permissions in discussion channels (jailbreak, tutorials, etc.)
+                if member_role:
+                    current_ow = channel.overwrites.get(member_role, discord.PermissionOverwrite())
+                    if (
+                        current_ow.create_public_threads is not True
+                        or current_ow.send_messages_in_threads is not True
+                        or current_ow.manage_webhooks is not False
+                    ):
+                        new_overwrites = dict(channel.overwrites)
+                        current_ow.create_public_threads = True
+                        current_ow.send_messages_in_threads = True
+                        current_ow.create_private_threads = False
+                        current_ow.manage_webhooks = False
+                        new_overwrites[member_role] = current_ow
+                        try:
+                            await channel.edit(overwrites=new_overwrites)
+                            logger.info(f"Enabled thread creation for @{member_role.name} in #{channel.name}")
+                        except Exception as e:
+                            logger.debug(f"Could not enable thread permissions in #{channel.name}: {e}")
+                continue
+
+            is_readonly = is_info_cat or any(kw in p_name for kw in read_only_keywords)
 
             if is_readonly:
                 # 1. Update channel permissions to deny thread creation and webhook management
@@ -729,7 +791,7 @@ class VerificationCog(commands.Cog, name="Verification"):
                     except Exception as e:
                         logger.warning(f"Could not update channel overwrites for #{channel.name}: {e}")
 
-                # 2. Delete any existing threads in this channel (e.g. 'helloo', 'Muse 1.3 jail break needed')
+                # 2. Delete any existing threads in strictly read-only channels
                 try:
                     for th in channel.threads:
                         try:

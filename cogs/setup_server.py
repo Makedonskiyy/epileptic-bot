@@ -248,13 +248,17 @@ class SetupServerCog(commands.Cog, name="Server Setup"):
                     overwrites[r] = discord.PermissionOverwrite(
                         view_channel=True,
                         send_messages=True,
+                        send_messages_in_threads=True,
+                        create_public_threads=True,
+                        create_private_threads=False,
                         read_messages=True,
                         read_message_history=True,
                         attach_files=True,
                         embed_links=True,
                         connect=True,
                         speak=True,
-                        mention_everyone=False
+                        mention_everyone=False,
+                        manage_webhooks=False
                     )
 
                 for s in staff_roles:
@@ -433,16 +437,17 @@ class SetupServerCog(commands.Cog, name="Server Setup"):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        """Auto-ensures necessary community discussion channels like #jailbreak-open exist."""
+        """Auto-ensures necessary community discussion channels and forum conversions exist."""
         for guild in self.bot.guilds:
             try:
                 await ensure_jailbreak_open_channel(guild)
+                await auto_convert_tutorials_forum(guild)
             except Exception as e:
-                logger.debug(f"Auto-check jailbreak channel error on {guild.name}: {e}")
+                logger.debug(f"Auto-check channels error on {guild.name}: {e}")
 
     @app_commands.command(
         name="create_jailbreak_chat",
-        description="Creates #🔓・jailbreak-open in the COMMUNITY category with full member write access."
+        description="Creates #🔓・jailbreak-open in the COMMUNITY category with full member write and thread access."
     )
     @is_owner()
     async def create_jailbreak_chat(self, interaction: discord.Interaction):
@@ -454,7 +459,7 @@ class SetupServerCog(commands.Cog, name="Server Setup"):
             await interaction.followup.send(
                 f"✅ Open discussion channel ready: {ch.mention}\n"
                 f"• **Category:** `{ch.category.name if ch.category else 'None'}`\n"
-                f"• **Permissions:** All verified members (`@Member`) can write, embed links, and attach files.",
+                f"• **Permissions:** All verified members (`@Member`) can write, embed links, attach files, and create topics/threads.",
                 ephemeral=True
             )
         else:
@@ -478,11 +483,113 @@ class SetupServerCog(commands.Cog, name="Server Setup"):
         else:
             await ctx.send("❌ Failed to create channel. Check bot permissions.")
 
+    @app_commands.command(
+        name="convert_to_forum",
+        description="Converts a channel (like #tutorials) into a native Discord Forum channel for topics."
+    )
+    @app_commands.describe(
+        channel="Text channel to convert (defaults to #tutorials)"
+    )
+    @is_staff()
+    async def convert_to_forum(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel = None
+    ):
+        """Converts an existing text channel into a native Discord Forum channel."""
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+
+        if "COMMUNITY" not in guild.features:
+            embed = discord.Embed(
+                title="⚠️ Discord Community Not Enabled",
+                description=(
+                    "Discord Forum channels require the **Community** feature to be enabled on this server.\n\n"
+                    "**To enable Community in 30 seconds:**\n"
+                    "1. In Discord, open **Server Settings** (Настройки сервера).\n"
+                    "2. Scroll down in the left menu and click **Enable Community** (Включить сообщество).\n"
+                    "3. Click **Get Started**, keep defaults, and finish.\n"
+                    "4. Re-run `/convert_to_forum`!"
+                ),
+                color=config.EMBED_COLOR_WARNING
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        target_ch = channel or discord.utils.find(
+            lambda c: "tutorial" in c.name.lower(),
+            guild.text_channels
+        )
+
+        if not target_ch:
+            if hasattr(guild, "forums") and discord.utils.find(lambda f: "tutorial" in f.name.lower(), guild.forums):
+                await interaction.followup.send("ℹ️ `#tutorials` is already a native Forum channel!", ephemeral=True)
+                return
+            await interaction.followup.send("❌ Channel not found. Please specify the text channel to convert.", ephemeral=True)
+            return
+
+        forum, err = await convert_text_to_forum(guild, target_ch)
+        if forum:
+            embed = discord.Embed(
+                title="✅ Forum Channel Created",
+                description=(
+                    f"Successfully converted #{target_ch.name} to forum {forum.mention}!\n\n"
+                    f"• **Type:** Forum (`discord.ChannelType.forum`)\n"
+                    f"• **Tags added:** `Guide`, `Tutorial`, `Prompt`, `Tool`, `Question`\n"
+                    f"• **Permissions:** All members can create topics/threads and participate."
+                ),
+                color=config.EMBED_COLOR_SUCCESS
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            audit = discord.Embed(
+                title="📚 [FORUM] Converted Channel to Forum",
+                description=f"Channel {forum.mention} converted to native Forum by {interaction.user.mention}.",
+                color=config.EMBED_COLOR_SUCCESS
+            )
+            await send_mod_log(guild, audit)
+        else:
+            await interaction.followup.send(f"❌ Failed to convert channel: `{err}`", ephemeral=True)
+
+    @commands.command(name="convert_forum", aliases=["converttoforum", "makeforum", "forum"])
+    async def convert_forum_cmd(self, ctx: commands.Context, channel: discord.TextChannel = None):
+        """Prefix fallback: !convert_forum [channel]"""
+        user_is_staff = (
+            ctx.author.id == ctx.guild.owner_id
+            or ctx.author.guild_permissions.administrator
+            or any(r.name.lower() in config.STAFF_ROLE_NAMES for r in ctx.author.roles)
+        )
+        if not user_is_staff:
+            await ctx.send("⛔ You do not have permission to execute this command.", delete_after=5)
+            return
+
+        guild = ctx.guild
+        if "COMMUNITY" not in guild.features:
+            await ctx.send("⚠️ Discord Community must be enabled in Server Settings before forum channels can be created.")
+            return
+
+        target_ch = channel or discord.utils.find(
+            lambda c: "tutorial" in c.name.lower(),
+            guild.text_channels
+        )
+        if not target_ch:
+            if hasattr(guild, "forums") and discord.utils.find(lambda f: "tutorial" in f.name.lower(), guild.forums):
+                await ctx.send("ℹ️ `#tutorials` is already a native Forum channel!")
+                return
+            await ctx.send("❌ Channel not found or already a forum channel.")
+            return
+
+        msg = await ctx.send("⏳ Converting channel to Forum channel...")
+        forum, err = await convert_text_to_forum(guild, target_ch)
+        if forum:
+            await msg.edit(content=f"✅ Successfully converted to forum channel: {forum.mention}")
+        else:
+            await msg.edit(content=f"❌ Failed to convert channel: `{err}`")
+
 
 async def ensure_jailbreak_open_channel(guild: discord.Guild) -> discord.TextChannel | None:
     """
     Checks if #🔓・jailbreak-open exists in COMMUNITY category.
-    If missing, creates it with optimized permissions (all @Members can write) and an intro guide.
+    If missing, creates it with optimized permissions (all @Members can write & create topics) and an intro guide.
     """
     if not guild or not guild.me.guild_permissions.manage_channels:
         return None
@@ -517,13 +624,17 @@ async def ensure_jailbreak_open_channel(guild: discord.Guild) -> discord.TextCha
         overwrites[r] = discord.PermissionOverwrite(
             view_channel=True,
             send_messages=True,
+            send_messages_in_threads=True,
+            create_public_threads=True,
+            create_private_threads=False,
             read_messages=True,
             read_message_history=True,
             attach_files=True,
             embed_links=True,
             connect=True,
             speak=True,
-            mention_everyone=False
+            mention_everyone=False,
+            manage_webhooks=False
         )
 
     for role in guild.roles:
@@ -537,6 +648,7 @@ async def ensure_jailbreak_open_channel(guild: discord.Guild) -> discord.TextCha
                 view_channel=True,
                 send_messages=True,
                 manage_messages=True,
+                manage_threads=True,
                 read_message_history=True,
                 attach_files=True,
                 embed_links=True
@@ -580,6 +692,187 @@ async def ensure_jailbreak_open_channel(guild: discord.Guild) -> discord.TextCha
     except Exception as e:
         logger.error(f"Failed to create #jailbreak-open channel in {guild.name}: {e}")
         return None
+
+
+async def convert_text_to_forum(
+    guild: discord.Guild,
+    channel: discord.TextChannel
+) -> tuple[discord.ForumChannel | None, str]:
+    """
+    Converts an existing text channel (e.g. #tutorials) to a Discord Forum channel.
+    Copies category, position, name, and configures tags and full member posting permissions.
+    """
+    if not guild or not guild.me.guild_permissions.manage_channels:
+        return None, "Bot lacks `Manage Channels` permission."
+
+    if "COMMUNITY" not in guild.features:
+        return None, "Server does not have Discord Community enabled. Enable Community in Server Settings first."
+
+    name = channel.name
+    category = channel.category
+    position = channel.position
+    topic = channel.topic or "📚 Guides, tutorials, prompt techniques, and AI research hub."
+
+    member_role = find_role_by_key(guild, "member", config.MEMBER_ROLE_NAME)
+    not_verified_role = find_role_by_key(guild, "unverified", config.UNVERIFIED_ROLE_NAME)
+    premium_role = find_role_by_key(guild, "premium", config.PREMIUM_ROLE_NAME)
+    ai_contrib_role = discord.utils.find(lambda r: r.name.lower() == config.AI_CONTRIBUTOR_ROLE_NAME.lower(), guild.roles)
+
+    overwrites = dict(channel.overwrites)
+    overwrites[guild.default_role] = discord.PermissionOverwrite(view_channel=False)
+    if not_verified_role:
+        overwrites[not_verified_role] = discord.PermissionOverwrite(view_channel=False)
+
+    general_members = [r for r in [member_role, premium_role, ai_contrib_role] if r]
+    for r in general_members:
+        overwrites[r] = discord.PermissionOverwrite(
+            view_channel=True,
+            send_messages=True,
+            send_messages_in_threads=True,
+            create_public_threads=True,
+            create_private_threads=False,
+            read_messages=True,
+            read_message_history=True,
+            attach_files=True,
+            embed_links=True,
+            add_reactions=True,
+            use_application_commands=True,
+            mention_everyone=False,
+            manage_webhooks=False
+        )
+
+    for role in guild.roles:
+        r_name = role.name.lower()
+        if (
+            r_name in config.STAFF_ROLE_NAMES
+            or any(alias in r_name for alias in config.ROLE_ALIASES.get("staff", []))
+            or role.permissions.administrator
+        ):
+            overwrites[role] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                manage_messages=True,
+                manage_threads=True,
+                read_message_history=True,
+                attach_files=True,
+                embed_links=True
+            )
+
+    tags = [
+        discord.ForumTag(name="Guide", emoji="📖"),
+        discord.ForumTag(name="Tutorial", emoji="📚"),
+        discord.ForumTag(name="Prompt", emoji="⚡"),
+        discord.ForumTag(name="Tool", emoji="🛠️"),
+        discord.ForumTag(name="Question", emoji="❓"),
+    ]
+
+    try:
+        # Delete old text channel
+        await channel.delete(reason="Converting to Forum Channel")
+    except Exception as d_err:
+        logger.warning(f"Could not delete old text channel #{name}: {d_err}")
+
+    try:
+        forum = await guild.create_forum(
+            name=name,
+            category=category,
+            position=position,
+            topic=topic,
+            overwrites=overwrites,
+            available_tags=tags,
+            default_layout=discord.ForumLayoutType.list_view,
+            reason="Epileptic Bot: Converted text channel to native forum channel"
+        )
+        logger.info(f"Created forum channel #{name} in {guild.name}")
+
+        guide_embed = discord.Embed(
+            title="📚 Welcome to the Tutorials & Guides Forum!",
+            description=(
+                "**Welcome to the community knowledge base!**\n\n"
+                "Here anyone with the `@Member` role can create new topics, post tutorials, or ask questions.\n\n"
+                "**How to post a topic:**\n"
+                "1. Click **New Post** (Новый пост) at the top.\n"
+                "2. Choose an appropriate tag (`Guide`, `Tutorial`, `Prompt`, `Tool`, or `Question`).\n"
+                "3. Give your post a descriptive title and detailed instructions.\n"
+                "4. Attach code snippets, prompts, or screenshots as needed.\n\n"
+                "⚠️ *Please check if a similar tutorial or question already exists before creating a duplicate post!*"
+            ),
+            color=config.RULES_EMBED_COLOR
+        )
+        if guild.icon:
+            guide_embed.set_thumbnail(url=guild.icon.url)
+        guide_embed.set_footer(text="Epileptic Community • Tutorials Forum")
+
+        try:
+            thread_with_msg = await forum.create_thread(
+                name="📌 [GUIDE] How to Post Tutorials & Prompts",
+                content="Welcome everyone! Read below before posting your first guide:",
+                embed=guide_embed,
+                applied_tags=[tags[0], tags[1]] if len(tags) >= 2 else []
+            )
+            await thread_with_msg.thread.edit(pinned=True)
+        except Exception as pin_err:
+            logger.debug(f"Could not pin initial forum guide post: {pin_err}")
+
+        return forum, "Success"
+    except Exception as f_err:
+        logger.error(f"Failed to create forum channel: {f_err}")
+        return None, str(f_err)
+
+
+async def auto_convert_tutorials_forum(guild: discord.Guild) -> bool:
+    """
+    Checks if #tutorials exists. If it's a TextChannel and server has COMMUNITY feature,
+    automatically converts it to a native Discord Forum channel.
+    If it's already a Forum channel, ensures @Member has thread creation permissions.
+    """
+    if not guild or not guild.me.guild_permissions.manage_channels:
+        return False
+
+    # Check if a forum channel already exists
+    if hasattr(guild, "forums"):
+        forum = discord.utils.find(lambda f: "tutorial" in f.name.lower(), guild.forums)
+        if forum:
+            member_role = find_role_by_key(guild, "member", config.MEMBER_ROLE_NAME)
+            if member_role:
+                ow = forum.overwrites.get(member_role, discord.PermissionOverwrite())
+                if ow.create_public_threads is not True or ow.send_messages is not True:
+                    new_ow = dict(forum.overwrites)
+                    ow.create_public_threads = True
+                    ow.send_messages = True
+                    ow.send_messages_in_threads = True
+                    ow.view_channel = True
+                    ow.read_message_history = True
+                    new_ow[member_role] = ow
+                    try:
+                        await forum.edit(overwrites=new_ow)
+                    except Exception:
+                        pass
+            return True
+
+    # Check if a text channel exists to convert
+    text_ch = discord.utils.find(lambda c: "tutorial" in c.name.lower(), guild.text_channels)
+    if text_ch:
+        if "COMMUNITY" in guild.features:
+            forum, err = await convert_text_to_forum(guild, text_ch)
+            return forum is not None
+        else:
+            # Community not enabled: ensure members can at least create threads in this text channel
+            member_role = find_role_by_key(guild, "member", config.MEMBER_ROLE_NAME)
+            if member_role:
+                ow = text_ch.overwrites.get(member_role, discord.PermissionOverwrite())
+                if ow.create_public_threads is not True or ow.send_messages_in_threads is not True:
+                    new_ow = dict(text_ch.overwrites)
+                    ow.create_public_threads = True
+                    ow.send_messages_in_threads = True
+                    ow.create_private_threads = False
+                    new_ow[member_role] = ow
+                    try:
+                        await text_ch.edit(overwrites=new_ow)
+                    except Exception:
+                        pass
+
+    return False
 
 
 async def setup(bot: commands.Bot):
